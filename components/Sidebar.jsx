@@ -19,7 +19,7 @@ export default function Sidebar() {
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
         <Link href="/dashboard" style={{ color: '#f8fafc', textDecoration: 'none' }}>Dashboard</Link>
         <Link href="/pos" style={{ color: '#f8fafc', textDecoration: 'none' }}>POS Checkout</Link>
-        <Link href="/productsinfo" style={{ color: '#f8fafc', textDecoration: 'none' }}>Products</Link>
+        <Link href="/products" style={{ color: '#f8fafc', textDecoration: 'none' }}>Products</Link>
         <Link href="/orders" style={{ color: '#f8fafc', textDecoration: 'none' }}>Orders</Link>
         <button 
           onClick={handleLogout}
