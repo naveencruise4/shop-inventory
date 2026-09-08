@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 import Link from 'next/link';
 
 export default function SignupPage() {
-  const [form, setForm] = useState({ email: '', password: '', fullName: '', shopName: '', businessType: 'furniture' });
+  const [form, setForm] = useState({ email: '', password: '', fullName: '', shopName: '' });
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -13,21 +14,41 @@ export default function SignupPage() {
     e.preventDefault();
     setLoading(true);
 
-    const res = await fetch('/api/auth/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form)
+    const { data: shop, error: shopError } = await supabase
+      .from('shops')
+      .insert([{ name: form.shopName, business_type: 'furniture' }])
+      .select()
+      .single();
+
+    if (shopError) {
+      alert(`Shop creation failed: ${shopError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
     });
 
-    const data = await res.json();
-    setLoading(false);
-
-    if (data.success) {
-      alert('Shop registered! Please login.');
-      router.push('/login');
-    } else {
-      alert(`Signup failed: ${data.error}`);
+    if (authError) {
+      alert(`Signup failed: ${authError.message}`);
+      setLoading(false);
+      return;
     }
+
+    if (authData.user) {
+      await supabase.from('users').insert([{
+        id: authData.user.id,
+        shop_id: shop.id,
+        full_name: form.fullName,
+        role: 'owner'
+      }]);
+    }
+
+    setLoading(false);
+    alert('Shop registered! Please sign in.');
+    router.push('/login');
   };
 
   return (
