@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabaseClient';
 
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
-  const [form, setForm] = useState({ name: '', sku: '', selling_price: '', stock_quantity: '', material: '', dimensions: '' });
+  const [form, setForm] = useState({ name: '', sku: '', selling_price: '', stock_quantity: '', material: '', dimensions: '', buying_price: '' });
 
   useEffect(() => {
     fetchProducts();
@@ -29,14 +29,15 @@ export default function ProductsPage() {
       sku: form.sku,
       selling_price: Number(form.selling_price),
       stock_quantity: Number(form.stock_quantity),
-      attributes: { material: form.material, dimensions: form.dimensions }
+      attributes: { material: form.material, dimensions: form.dimensions },
+      buying_price: Number(form.buying_price),
     };
 
     const { error } = await supabase.from('productsinfo').insert([payload]);
     if (error) {
       alert(`Error adding product: ${error.message}`);
     } else {
-      setForm({ name: '', sku: '', selling_price: '', stock_quantity: '', material: '', dimensions: '' });
+      setForm({ name: '', sku: '', selling_price: '', stock_quantity: '', material: '', dimensions: '', buying_price: '' });
       fetchProducts();
     }
   };
@@ -50,6 +51,7 @@ export default function ProductsPage() {
         <form onSubmit={handleAddProduct} className="form-grid">
           <input placeholder="Item Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           <input placeholder="SKU Code" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} required />
+          <input type="number" placeholder="Buying Price (₹)" value={form.buying_price} onChange={(e) => setForm({ ...form, buying_price: e.target.value })} required />
           <input type="number" placeholder="Selling Price (₹)" value={form.selling_price} onChange={(e) => setForm({ ...form, selling_price: e.target.value })} required />
           <input type="number" placeholder="Initial Stock" value={form.stock_quantity} onChange={(e) => setForm({ ...form, stock_quantity: e.target.value })} required />
           <input placeholder="Material" value={form.material} onChange={(e) => setForm({ ...form, material: e.target.value })} />
@@ -64,6 +66,7 @@ export default function ProductsPage() {
                 <th>Name</th>
                 <th>SKU</th>
                 <th>Specs</th>
+                <th>PurchasePrice</th>
                 <th>Price</th>
                 <th>Stock</th>
               </tr>
@@ -74,6 +77,7 @@ export default function ProductsPage() {
                   <td>{p.name}</td>
                   <td>{p.sku}</td>
                   <td className="specs">{p.attributes?.material} {p.attributes?.dimensions && `(${p.attributes.dimensions})`}</td>
+                 <td>₹{p.buying_price}</td>
                   <td>₹{p.selling_price}</td>
                   <td>{p.stock_quantity}</td>
                 </tr>
