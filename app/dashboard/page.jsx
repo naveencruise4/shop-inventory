@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Sidebar from '@/components/Sidebar';
-import { supabase } from '@/lib/supabaseClient';
+import Sidebar from '@/components/Sidebar.jsx';
+import { supabase } from '@/lib/supabaseClient.js';
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState({ totalSales: 0, pendingOrders: 0, lowStockCount: 0 });
@@ -10,7 +10,7 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadMetrics() {
       const { data: salesData } = await supabase.from('sales').select('total_amount, order_status');
-      const { data: productsData } = await supabase.from('products').select('stock_quantity');
+      const { data: productsData } = await supabase.from('productsinfo').select('stock_quantity');
 
       if (salesData) {
         const total = salesData.reduce((sum, s) => sum + Number(s.total_amount), 0);
