@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Sidebar from '@/components/Sidebar.jsx';
-import { supabase } from '@/lib/supabaseClient.js';
+import Sidebar from '@/components/Sidebar';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState({ totalSales: 0, pendingOrders: 0, lowStockCount: 0 });
