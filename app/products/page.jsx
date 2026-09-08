@@ -22,7 +22,7 @@ export default function ProductsPage() {
     const { data: userData } = await supabase.from('users').select('shop_id').single();
 
     const payload = {
-      shop_id: userData.shop_id,
+      shop_id: userData?.shop_id,
       name: form.name,
       sku: form.sku,
       selling_price: Number(form.selling_price),
@@ -68,7 +68,7 @@ export default function ProductsPage() {
             </tr>
           </thead>
           <tbody>
-            {productsinfo.map((p) => (
+            {products.map((p) => (
               <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                 <td style={{ padding: '12px' }}>{p.name}</td>
                 <td style={{ padding: '12px' }}>{p.sku}</td>

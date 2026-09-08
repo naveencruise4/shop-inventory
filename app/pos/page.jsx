@@ -30,7 +30,7 @@ export default function POSPage() {
     if (cart.length === 0) return alert('Select products to checkout.');
 
     const { data: userData } = await supabase.from('users').select('shop_id').single();
-    const shopId = userData.shop_id;
+    const shopId = userData?.shop_id;
 
     let customerId = null;
     if (customer.name && customer.phone) {
@@ -86,7 +86,7 @@ export default function POSPage() {
         <div style={{ flex: 2 }}>
           <h1>POS Terminal</h1>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat( auto-fill, minmax(180px, 1fr) )', gap: '15px' }}>
-            {productsinfo.map((p) => (
+            {products.map((p) => (
               <div key={p.id} style={{ background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                 <h4 style={{ margin: '0 0 5px 0' }}>{p.name}</h4>
                 <p style={{ margin: 0, color: '#64748b', fontSize: '12px' }}>Stock: {p.stock_quantity}</p>
