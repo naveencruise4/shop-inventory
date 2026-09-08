@@ -1,16 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
 
   const navItems = [
     { label: 'Dashboard', href: '/dashboard' },
     { label: 'Products', href: '/products' },
     { label: 'POS', href: '/pos' },
   ];
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
 
   return (
     <aside className="sidebar">
@@ -27,6 +34,12 @@ export default function Sidebar() {
         ))}
       </nav>
 
+      <div className="logout-section">
+        <button onClick={handleLogout} className="logout-btn">
+          Log Out
+        </button>
+      </div>
+
       <style jsx>{`
         .sidebar {
           width: 220px;
@@ -36,6 +49,9 @@ export default function Sidebar() {
           padding: 20px;
           box-sizing: border-box;
           flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
         }
 
         .logo {
@@ -49,6 +65,7 @@ export default function Sidebar() {
           display: flex;
           flex-direction: column;
           gap: 10px;
+          flex: 1;
         }
 
         :global(.nav-item) {
@@ -66,12 +83,34 @@ export default function Sidebar() {
           color: #fff;
         }
 
-        /* Mobile View: Top bar instead of sidebar */
+        .logout-section {
+          padding-top: 20px;
+          border-top: 1px solid #334155;
+        }
+
+        .logout-btn {
+          width: 100%;
+          padding: 10px;
+          background: #ef4444;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-weight: bold;
+          font-size: 14px;
+          transition: background 0.2s;
+        }
+
+        .logout-btn:hover {
+          background: #dc2626;
+        }
+
+        /* Mobile View */
         @media (max-width: 768px) {
           .sidebar {
             width: 100%;
             min-height: auto;
-            display: flex;
+            flex-direction: row;
             align-items: center;
             justify-content: space-between;
             padding: 12px 16px;
@@ -84,11 +123,22 @@ export default function Sidebar() {
           nav {
             flex-direction: row;
             gap: 5px;
+            flex: initial;
           }
 
           :global(.nav-item) {
             padding: 6px 10px;
             font-size: 13px;
+          }
+
+          .logout-section {
+            padding-top: 0;
+            border-top: none;
+          }
+
+          .logout-btn {
+            padding: 6px 10px;
+            font-size: 12px;
           }
         }
       `}</style>
