@@ -12,6 +12,7 @@ export default function Sidebar() {
     { label: 'Dashboard', href: '/dashboard' },
     { label: 'Products', href: '/products' },
     { label: 'POS', href: '/pos' },
+    { label: 'Orders', href: '/orders' },
   ];
 
   const handleLogout = async () => {
