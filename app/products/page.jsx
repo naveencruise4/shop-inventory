@@ -18,7 +18,7 @@ export default function ProductsPage() {
 
   // Forms State
   const [newProd, setNewProd] = useState({ sku: '', name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
-  const [restock, setRestock] = useState({ quantity: '', purchase_cost: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
+  const [restock, setRestock] = useState({ quantity: '', purchase_price: '', avg_cost_price: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
 
   // Tab Data
   const [purchasesHistory, setPurchasesHistory] = useState([]);
@@ -85,7 +85,7 @@ export default function ProductsPage() {
     if (!selectedProduct) return;
 
     const incomingQty = Number(restock.quantity);
-    const incomingCost = Number(restock.purchase_cost);
+    const incomingCost = Number(restock.purchase_price);
     const currentQty = selectedProduct.total_stock;
     const currentAvgCost = selectedProduct.avg_cost_price;
 
@@ -99,7 +99,7 @@ export default function ProductsPage() {
     await supabase.from('product_purchases').insert([{
       product_id: selectedProduct.id,
       quantity: incomingQty,
-      purchase_cost: incomingCost,
+      purchase_price: incomingCost,
       supplier_name: restock.supplier_name,
       purchase_date: restock.purchase_date
     }]);
@@ -111,7 +111,7 @@ export default function ProductsPage() {
     }).eq('id', selectedProduct.id);
 
     setShowRestockModal(false);
-    setRestock({ quantity: '', purchase_cost: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
+    setRestock({ quantity: '', purchase_price: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
     
     // Refresh
     const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
@@ -231,8 +231,8 @@ export default function ProductsPage() {
                           <td>{p.purchase_date}</td>
                           <td>{p.supplier_name || 'N/A'}</td>
                           <td>{p.quantity}</td>
-                          <td>₹{p.purchase_cost}</td>
-                          <td>₹{(p.quantity * p.purchase_cost).toFixed(2)}</td>
+                          <td>₹{p.purchase_price}</td>
+                          <td>₹{(p.quantity * p.purchase_price).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -339,7 +339,7 @@ export default function ProductsPage() {
               <h3>Restock Batch: {selectedProduct.name}</h3>
               <form onSubmit={handleRestock}>
                 <input type="number" placeholder="Quantity Received" value={restock.quantity} onChange={(e) => setRestock({ ...restock, quantity: e.target.value })} required />
-                <input type="number" step="0.01" placeholder="Purchase Cost Per Unit (₹)" value={restock.purchase_cost} onChange={(e) => setRestock({ ...restock, purchase_cost: e.target.value })} required />
+                <input type="number" step="0.01" placeholder="Purchase Cost Per Unit (₹)" value={restock.purchase_price} onChange={(e) => setRestock({ ...restock, purchase_price: e.target.value })} required />
                 <input placeholder="Supplier Name (Optional)" value={restock.supplier_name} onChange={(e) => setRestock({ ...restock, supplier_name: e.target.value })} />
                 <input type="date" value={restock.purchase_date} onChange={(e) => setRestock({ ...restock, purchase_date: e.target.value })} required />
                 <div className="modal-actions">
