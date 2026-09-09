@@ -8,257 +8,400 @@ import { supabase } from '@/lib/supabaseClient';
 
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [purchases, setPurchases] = useState({});
   const [search, setSearch] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState(null); // For Restock Modal/Form
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview');
+  
+  // Modals
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showRestockModal, setShowRestockModal] = useState(false);
 
-  const [form, setForm] = useState({
-    name: '',
-    sku: '',
-    category_id: '',
-    purchase_price: '',
-    delivery_margin_pct: '',
-    selling_price: '',
-    quantity: '',
-    purchase_date: new Date().toISOString().split('T')[0]
-  });
+  // Forms State
+  const [newProd, setNewProd] = useState({ sku: '', product_name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
+  const [restock, setRestock] = useState({ quantity: '', purchase_cost: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
+
+  // Tab Data
+  const [purchasesHistory, setPurchasesHistory] = useState([]);
+  const [salesHistory, setSalesHistory] = useState([]);
 
   useEffect(() => {
-    loadData();
+    fetchProducts();
   }, []);
 
-  const loadData = async () => {
-    const { data: catData } = await supabase.from('categories').select('*');
-    if (catData) setCategories(catData);
+  useEffect(() => {
+    if (selectedProduct) {
+      if (activeTab === 'purchases') fetchPurchaseHistory(selectedProduct.id);
+      if (activeTab === 'sales') fetchSalesHistory(selectedProduct.sku);
+    }
+  }, [selectedProduct, activeTab]);
 
-    const { data: prodData } = await supabase
-      .from('productsinfo')
-      .select('*, categories(name)')
-      .order('created_at', { ascending: false });
-    if (prodData) setProducts(prodData);
+  const fetchProducts = async () => {
+    const { data } = await supabase.from('vw_product_stock').select('*');
+    if (data) setProducts(data);
+  };
 
-    const { data: purchaseData } = await supabase
+  const fetchPurchaseHistory = async (productId) => {
+    const { data } = await supabase
       .from('product_purchases')
       .select('*')
+      .eq('product_id', productId)
       .order('purchase_date', { ascending: false });
-
-    if (purchaseData) {
-      const grouped = purchaseData.reduce((acc, p) => {
-        acc[p.product_id] = acc[p.product_id] || [];
-        acc[p.product_id].push(p);
-        return acc;
-      }, {});
-      setPurchases(grouped);
-    }
+    if (data) setPurchasesHistory(data);
   };
 
-  // Bidirectional Calculation Logic
-  const handlePurchasePriceChange = (val) => {
-    const cost = Number(val) || 0;
-    const pct = Number(form.delivery_margin_pct) || 0;
-    const calcSelling = cost + (cost * (pct / 100));
-    setForm({ ...form, purchase_price: val, selling_price: calcSelling ? calcSelling.toFixed(2) : '' });
+  const fetchSalesHistory = async (sku) => {
+    const { data } = await supabase
+      .from('sale_items')
+      .select('*, sales(created_at, sale_status, customer_id, customers(name))')
+      .eq('sku', sku)
+      .order('created_at', { ascending: false });
+    if (data) setSalesHistory(data);
   };
 
-  const handleMarginChange = (val) => {
-    const pct = Number(val) || 0;
-    const cost = Number(form.purchase_price) || 0;
-    const calcSelling = cost + (cost * (pct / 100));
-    setForm({ ...form, delivery_margin_pct: val, selling_price: calcSelling ? calcSelling.toFixed(2) : '' });
-  };
-
-  const handleSellingPriceChange = (val) => {
-    const sell = Number(val) || 0;
-    const cost = Number(form.purchase_price) || 0;
-    let calcPct = 0;
-    if (cost > 0) {
-      calcPct = ((sell - cost) / cost) * 100;
-    }
-    setForm({ ...form, selling_price: val, delivery_margin_pct: calcPct ? calcPct.toFixed(2) : '' });
-  };
-
-  const handleSubmit = async (e) => {
+  // Create Product Definition Only
+  const handleCreateProduct = async (e) => {
     e.preventDefault();
-    const { data: userData } = await supabase.from('users').select('shop_id').single();
-    const shopId = userData?.shop_id;
+    const { data, error } = await supabase.from('productsinfo').insert([{
+      sku: newProd.sku,
+      product_name: newProd.product_name,
+      category_name: newProd.category_name,
+      selling_price: Number(newProd.selling_price),
+      min_stock_level: Number(newProd.min_stock_level),
+      stock_quantity: 0,
+      avg_cost_price: 0
+    }]).select().single();
 
-    const purchaseCost = Number(form.purchase_price);
-    const newQty = Number(form.quantity);
-
-    if (selectedProduct) {
-      // RESTOCK EXISTING PRODUCT
-      const currentStock = Number(selectedProduct.stock_quantity) || 0;
-      const currentAvgCost = Number(selectedProduct.avg_cost_price) || purchaseCost;
-
-      // Weighted Average Cost Formula: ((Current Stock * Current Avg Cost) + (New Qty * New Purchase Cost)) / Total Stock
-      const totalStock = currentStock + newQty;
-      const newAvgCost = totalStock > 0 ? ((currentStock * currentAvgCost) + (newQty * purchaseCost)) / totalStock : purchaseCost;
-
-      // 1. Update Product
-      await supabase.from('productsinfo').update({
-        stock_quantity: totalStock,
-        avg_cost_price: Number(newAvgCost.toFixed(2)),
-        selling_price: Number(form.selling_price),
-        delivery_margin_pct: Number(form.delivery_margin_pct)
-      }).eq('id', selectedProduct.id);
-
-      // 2. Log Purchase Batch
-      await supabase.from('product_purchases').insert([{
-        shop_id: shopId,
-        product_id: selectedProduct.id,
-        purchase_price: purchaseCost,
-        quantity: newQty,
-        purchase_date: form.purchase_date
-      }]);
-
-      alert('Product restocked and Average Cost updated!');
-      setSelectedProduct(null);
-    } else {
-      // NEW PRODUCT CREATION
-      const { data: product, error: prodErr } = await supabase
-        .from('productsinfo')
-        .insert([{
-          shop_id: shopId,
-          name: form.name,
-          sku: form.sku,
-          category_id: form.category_id || null,
-          selling_price: Number(form.selling_price),
-          delivery_margin_pct: Number(form.delivery_margin_pct),
-          avg_cost_price: purchaseCost,
-          stock_quantity: newQty
-        }])
-        .select()
-        .single();
-
-      if (prodErr) return alert(`Error creating product: ${prodErr.message}`);
-
-      await supabase.from('product_purchases').insert([{
-        shop_id: shopId,
-        product_id: product.id,
-        purchase_price: purchaseCost,
-        quantity: newQty,
-        purchase_date: form.purchase_date
-      }]);
+    if (!error) {
+      setShowAddModal(false);
+      setNewProd({ sku: '', product_name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
+      fetchProducts();
+      if (data) setSelectedProduct(data);
     }
-
-    setForm({
-      name: '', sku: '', category_id: '', purchase_price: '',
-      delivery_margin_pct: '', selling_price: '', quantity: '',
-      purchase_date: new Date().toISOString().split('T')[0]
-    });
-    loadData();
   };
 
-  const handleSelectRestock = (p) => {
-    setSelectedProduct(p);
-    setForm({
-      name: p.name,
-      sku: p.sku,
-      category_id: p.category_id || '',
-      purchase_price: p.avg_cost_price || '',
-      delivery_margin_pct: p.delivery_margin_pct || '',
-      selling_price: p.selling_price || '',
-      quantity: '',
-      purchase_date: new Date().toISOString().split('T')[0]
-    });
+  // Restock & Recalculate Weighted Average Cost (WAC)
+  const handleRestock = async (e) => {
+    e.preventDefault();
+    if (!selectedProduct) return;
+
+    const incomingQty = Number(restock.quantity);
+    const incomingCost = Number(restock.purchase_cost);
+    const currentQty = selectedProduct.total_stock;
+    const currentAvgCost = selectedProduct.avg_cost_price;
+
+    // Weighted Average Cost Formula
+    const newTotalQty = currentQty + incomingQty;
+    const newAvgCost = newTotalQty > 0 
+      ? ((currentQty * currentAvgCost) + (incomingQty * incomingCost)) / newTotalQty 
+      : incomingCost;
+
+    // 1. Insert Purchase Batch Log
+    await supabase.from('product_purchases').insert([{
+      product_id: selectedProduct.id,
+      quantity: incomingQty,
+      purchase_cost: incomingCost,
+      supplier_name: restock.supplier_name,
+      purchase_date: restock.purchase_date
+    }]);
+
+    // 2. Update Product Inventory & WAC
+    await supabase.from('productsinfo').update({
+      stock_quantity: newTotalQty,
+      avg_cost_price: newAvgCost
+    }).eq('id', selectedProduct.id);
+
+    setShowRestockModal(false);
+    setRestock({ quantity: '', purchase_cost: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
+    
+    // Refresh
+    const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
+    if (updated) setSelectedProduct(updated);
+    fetchProducts();
   };
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(search.toLowerCase()) || 
-    p.sku.toLowerCase().includes(search.toLowerCase())
+  const filteredProducts = products.filter(p =>
+    p.product_name.toLowerCase().includes(search.toLowerCase()) ||
+    p.sku.toLowerCase().includes(search.toLowerCase()) ||
+    p.category_name.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
     <div className="layout">
       <Sidebar />
       <main className="content">
-        <div className="header-flex">
-          <h1>{selectedProduct ? `Restock: ${selectedProduct.name}` : 'Catalog & Inventory'}</h1>
-          {selectedProduct && (
-            <button className="cancel-btn" onClick={() => { setSelectedProduct(null); setForm({ name: '', sku: '', category_id: '', purchase_price: '', delivery_margin_pct: '', selling_price: '', quantity: '', purchase_date: new Date().toISOString().split('T')[0] }); }}>
-              Cancel Restock
-            </button>
-          )}
-        </div>
+        {selectedProduct ? (
+          /* ================= PRODUCT DETAILS VIEW ================= */
+          <div className="details-wrapper">
+            <button className="back-btn" onClick={() => setSelectedProduct(null)}>← Back to Products</button>
+            
+            <div className="header-card">
+              <div className="header-main">
+                <div>
+                  <h2>{selectedProduct.product_name}</h2>
+                  <span className="sku-badge">SKU: {selectedProduct.sku}</span>
+                </div>
+                <button className="action-btn" onClick={() => setShowRestockModal(true)}>+ Restock Inventory</button>
+              </div>
 
-        <form onSubmit={handleSubmit} className="form-grid">
-          <input placeholder="Item Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={!!selectedProduct} required />
-          <input placeholder="SKU Code" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} disabled={!!selectedProduct} required />
-          
-          <select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })} disabled={!!selectedProduct}>
-            <option value="">Select Category</option>
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+              <div className="metrics-bar">
+                <div className="metric">
+                  <span className="label">Selling Price</span>
+                  <span className="val">₹{Number(selectedProduct.selling_price).toLocaleString()}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Avg Cost Price</span>
+                  <span className="val">₹{Number(selectedProduct.avg_cost_price).toLocaleString()}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Total Stock</span>
+                  <span className="val">{selectedProduct.total_stock}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Reserved</span>
+                  <span className="val text-amber">{selectedProduct.reserved_stock}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Available</span>
+                  <span className="val text-green">{selectedProduct.available_stock}</span>
+                </div>
+              </div>
+            </div>
 
-          <input type="number" step="0.01" placeholder="Purchase Cost (₹)" value={form.purchase_price} onChange={(e) => handlePurchasePriceChange(e.target.value)} required />
-          <input type="number" step="0.01" placeholder="Delivery Margin %" value={form.delivery_margin_pct} onChange={(e) => handleMarginChange(e.target.value)} />
-          <input type="number" step="0.01" placeholder="Selling Price (₹)" value={form.selling_price} onChange={(e) => handleSellingPriceChange(e.target.value)} required />
-          <input type="number" placeholder="Restock/Initial Qty" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} required />
-          <input type="date" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} required />
-
-          <button type="submit" className="submit-btn">
-            {selectedProduct ? 'Update Stock & Recalculate WAC' : 'Add New Product'}
-          </button>
-        </form>
-
-        <div className="search-bar">
-          <input placeholder="Search products by Name or SKU..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Category</th>
-                <th>Stock</th>
-                <th>Selling Price</th>
-                <th>Avg Cost (WAC)</th>
-                <th>Margin %</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <strong>{p.name}</strong>
-                    <div className="subtext">SKU: {p.sku}</div>
-                  </td>
-                  <td>{p.categories?.name || 'Uncategorized'}</td>
-                  <td><strong>{p.stock_quantity}</strong></td>
-                  <td>₹{p.selling_price}</td>
-                  <td>₹{p.avg_cost_price || 0}</td>
-                  <td>{p.delivery_margin_pct || 0}%</td>
-                  <td>
-                    <button className="restock-btn" onClick={() => handleSelectRestock(p)}>
-                      Restock / Edit Price
-                    </button>
-                  </td>
-                </tr>
+            {/* TAB NAVIGATION */}
+            <div className="tabs">
+              {['overview', 'stock', 'purchases', 'sales'].map(tab => (
+                <button key={tab} className={`tab ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+
+            {/* TAB CONTENT */}
+            <div className="tab-content">
+              {activeTab === 'overview' && (
+                <div className="info-grid">
+                  <div className="card">
+                    <h4>Product Info</h4>
+                    <p><strong>Category:</strong> {selectedProduct.category_name}</p>
+                    <p><strong>Stock Status:</strong> <span className={`status-tag ${selectedProduct.status.toLowerCase().replace(/\s+/g, '-')}`}>{selectedProduct.status}</span></p>
+                    <p><strong>Min Reorder Level:</strong> {selectedProduct.min_stock_level || 3} units</p>
+                  </div>
+                  <div className="card">
+                    <h4>Margin Analysis</h4>
+                    {selectedProduct.selling_price > 0 && (
+                      <>
+                        <p><strong>Gross Profit/Unit:</strong> ₹{(selectedProduct.selling_price - selectedProduct.avg_cost_price).toFixed(2)}</p>
+                        <p><strong>Margin %:</strong> {(((selectedProduct.selling_price - selectedProduct.avg_cost_price) / selectedProduct.selling_price) * 100).toFixed(1)}%</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'stock' && (
+                <div className="card">
+                  <h4>Stock Breakdown</h4>
+                  <div className="stock-breakdown">
+                    <div className="stock-box">
+                      <span className="num">{selectedProduct.total_stock}</span>
+                      <span className="lbl">Physical On Hand</span>
+                    </div>
+                    <div className="stock-box amber">
+                      <span className="num">{selectedProduct.reserved_stock}</span>
+                      <span className="lbl">Reserved in Pending Orders</span>
+                    </div>
+                    <div className="stock-box green">
+                      <span className="num">{selectedProduct.available_stock}</span>
+                      <span className="lbl">Available for Sale</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'purchases' && (
+                <div className="card">
+                  <h4>Restock & Purchase Batches</h4>
+                  <table>
+                    <thead>
+                      <tr><th>Date</th><th>Supplier</th><th>Qty</th><th>Cost/Unit</th><th>Total</th></tr>
+                    </thead>
+                    <tbody>
+                      {purchasesHistory.map(p => (
+                        <tr key={p.id}>
+                          <td>{p.purchase_date}</td>
+                          <td>{p.supplier_name || 'N/A'}</td>
+                          <td>{p.quantity}</td>
+                          <td>₹{p.purchase_cost}</td>
+                          <td>₹{(p.quantity * p.purchase_cost).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeTab === 'sales' && (
+                <div className="card">
+                  <h4>Sales History</h4>
+                  <table>
+                    <thead>
+                      <tr><th>Order Date</th><th>Customer</th><th>Qty Sold</th><th>Sale Price</th></tr>
+                    </thead>
+                    <tbody>
+                      {salesHistory.map(s => (
+                        <tr key={s.id}>
+                          <td>{new Date(s.sales?.created_at).toLocaleDateString()}</td>
+                          <td>{s.sales?.customers?.name || 'Walk-in'}</td>
+                          <td>{s.quantity}</td>
+                          <td>₹{s.price}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* ================= MASTER PRODUCTS LIST VIEW ================= */
+          <>
+            <div className="top-bar">
+              <h1>Products</h1>
+              <button className="primary-btn" onClick={() => setShowAddModal(true)}>+ Add Product</button>
+            </div>
+
+            <div className="filter-bar">
+              <input 
+                placeholder="Search by Product Name, SKU, Category..." 
+                value={search} 
+                onChange={(e) => setSearch(e.target.value)} 
+                className="search-input" 
+              />
+            </div>
+
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th>Selling Price</th>
+                    <th>Available Stock</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredProducts.map(p => (
+                    <tr key={p.id} className="clickable-row" onClick={() => setSelectedProduct(p)}>
+                      <td><strong>{p.sku}</strong></td>
+                      <td>{p.product_name}</td>
+                      <td>{p.category_name}</td>
+                      <td>₹{Number(p.selling_price).toLocaleString()}</td>
+                      <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
+                      <td>
+                        <span className={`status-tag ${p.status.toLowerCase().replace(/\s+/g, '-')}`}>
+                          {p.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {/* ================= MODAL: ADD PRODUCT DEFINITION ================= */}
+        {showAddModal && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Add New Product Catalog Entry</h3>
+              <form onSubmit={handleCreateProduct}>
+                <input placeholder="SKU (e.g. SOF-001)" value={newProd.sku} onChange={(e) => setNewProd({ ...newProd, sku: e.target.value })} required />
+                <input placeholder="Product Name" value={newProd.product_name} onChange={(e) => setNewProd({ ...newProd, product_name: e.target.value })} required />
+                <input placeholder="Category" value={newProd.category_name} onChange={(e) => setNewProd({ ...newProd, category_name: e.target.value })} required />
+                <input type="number" step="0.01" placeholder="Selling Price (₹)" value={newProd.selling_price} onChange={(e) => setNewProd({ ...newProd, selling_price: e.target.value })} required />
+                <input type="number" placeholder="Min Stock Alert Level" value={newProd.min_stock_level} onChange={(e) => setNewProd({ ...newProd, min_stock_level: e.target.value })} required />
+                <div className="modal-actions">
+                  <button type="submit" className="action-btn">Save Product</button>
+                  <button type="button" className="cancel-btn" onClick={() => setShowAddModal(false)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: RESTOCK INVENTORY ================= */}
+        {showRestockModal && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Restock Batch: {selectedProduct.product_name}</h3>
+              <form onSubmit={handleRestock}>
+                <input type="number" placeholder="Quantity Received" value={restock.quantity} onChange={(e) => setRestock({ ...restock, quantity: e.target.value })} required />
+                <input type="number" step="0.01" placeholder="Purchase Cost Per Unit (₹)" value={restock.purchase_cost} onChange={(e) => setRestock({ ...restock, purchase_cost: e.target.value })} required />
+                <input placeholder="Supplier Name (Optional)" value={restock.supplier_name} onChange={(e) => setRestock({ ...restock, supplier_name: e.target.value })} />
+                <input type="date" value={restock.purchase_date} onChange={(e) => setRestock({ ...restock, purchase_date: e.target.value })} required />
+                <div className="modal-actions">
+                  <button type="submit" className="action-btn">Confirm Restock</button>
+                  <button type="button" className="cancel-btn" onClick={() => setShowRestockModal(false)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </main>
 
       <style jsx>{`
-        .layout { display: flex; min-height: 100vh; }
+        .layout { display: flex; min-height: 100vh; background: #f8fafc; }
         .content { flex: 1; padding: 24px; box-sizing: border-box; }
-        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-        .form-grid { background: #fff; padding: 16px; border-radius: 8px; margin-bottom: 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; border: 1px solid #e2e8f0; }
-        input, select { padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; width: 100%; box-sizing: border-box; }
-        .search-bar { margin-bottom: 16px; }
-        :global(.submit-btn) { grid-column: 1 / -1; padding: 12px; background: #16a34a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .cancel-btn { background: #64748b; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }
-        .restock-btn { background: #0284c7; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-        .table-wrapper { overflow-x: auto; background: #fff; border-radius: 8px; border: 1px solid #e2e8f0; }
-        table { width: 100%; border-collapse: collapse; min-width: 700px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
-        th { background: #f8fafc; }
-        .subtext { font-size: 12px; color: #64748b; }
-        @media (max-width: 768px) { .layout { flex-direction: column; } .content { padding: 16px; } }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .primary-btn, .action-btn { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
+        .filter-bar { margin-bottom: 16px; }
+        .search-input { width: 100%; max-width: 400px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
+        .table-wrapper { background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        th, td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f1f5f9; color: #475569; }
+        .clickable-row { cursor: pointer; transition: background 0.15s; }
+        .clickable-row:hover { background: #f8fafc; }
+        .subtext { font-size: 12px; color: #94a3b8; }
+        
+        .status-tag { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .status-tag.healthy { background: #dcfce7; color: #15803d; }
+        .status-tag.low { background: #fef9c3; color: #a16207; }
+        .status-tag.out-of-stock { background: #fee2e2; color: #b91c1c; }
+
+        /* Details View */
+        .back-btn { background: none; border: none; color: #0284c7; cursor: pointer; margin-bottom: 12px; font-size: 14px; padding: 0; }
+        .header-card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; }
+        .header-main { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+        .sku-badge { background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px; color: #475569; }
+        .metrics-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+        .metric { display: flex; flex-direction: column; }
+        .metric .label { font-size: 12px; color: #64748b; }
+        .metric .val { font-size: 18px; font-weight: bold; }
+        .text-amber { color: #d97706; }
+        .text-green { color: #16a34a; }
+
+        .tabs { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px; }
+        .tab { background: none; border: none; padding: 10px 16px; cursor: pointer; color: #64748b; font-weight: 500; border-bottom: 2px solid transparent; }
+        .tab.active { color: #0f172a; border-bottom-color: #0f172a; }
+
+        .card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 16px; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+        .stock-breakdown { display: flex; gap: 16px; margin-top: 12px; }
+        .stock-box { flex: 1; padding: 16px; background: #f8fafc; border-radius: 6px; text-align: center; border: 1px solid #e2e8f0; }
+        .stock-box.amber { background: #fffbeb; border-color: #fde68a; }
+        .stock-box.green { background: #f0fdf4; border-color: #bbf7d0; }
+        .stock-box .num { display: block; font-size: 24px; font-weight: bold; }
+        .stock-box .lbl { font-size: 12px; color: #64748b; }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 400px; display: flex; flex-direction: column; gap: 12px; }
+        .modal input { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
+        .modal-actions { display: flex; gap: 10px; }
+        .cancel-btn { flex: 1; padding: 10px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; }
       `}</style>
     </div>
   );
