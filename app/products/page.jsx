@@ -17,7 +17,7 @@ export default function ProductsPage() {
   const [showRestockModal, setShowRestockModal] = useState(false);
 
   // Forms State
-  const [newProd, setNewProd] = useState({ sku: '', product_name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
+  const [newProd, setNewProd] = useState({ sku: '', name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
   const [restock, setRestock] = useState({ quantity: '', purchase_cost: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
 
   // Tab Data
@@ -63,7 +63,7 @@ export default function ProductsPage() {
     e.preventDefault();
     const { data, error } = await supabase.from('productsinfo').insert([{
       sku: newProd.sku,
-      product_name: newProd.product_name,
+      name: newProd.name,
       category_name: newProd.category_name,
       selling_price: Number(newProd.selling_price),
       min_stock_level: Number(newProd.min_stock_level),
@@ -73,7 +73,7 @@ export default function ProductsPage() {
 
     if (!error) {
       setShowAddModal(false);
-      setNewProd({ sku: '', product_name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
+      setNewProd({ sku: '', name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
       fetchProducts();
       if (data) setSelectedProduct(data);
     }
@@ -120,7 +120,7 @@ export default function ProductsPage() {
   };
 
   const filteredProducts = products.filter(p =>
-    p.product_name.toLowerCase().includes(search.toLowerCase()) ||
+    p.name.toLowerCase().includes(search.toLowerCase()) ||
     p.sku.toLowerCase().includes(search.toLowerCase()) ||
     p.category_name.toLowerCase().includes(search.toLowerCase())
   );
@@ -137,7 +137,7 @@ export default function ProductsPage() {
             <div className="header-card">
               <div className="header-main">
                 <div>
-                  <h2>{selectedProduct.product_name}</h2>
+                  <h2>{selectedProduct.name}</h2>
                   <span className="sku-badge">SKU: {selectedProduct.sku}</span>
                 </div>
                 <button className="action-btn" onClick={() => setShowRestockModal(true)}>+ Restock Inventory</button>
@@ -295,7 +295,7 @@ export default function ProductsPage() {
                   {filteredProducts.map(p => (
                     <tr key={p.id} className="clickable-row" onClick={() => setSelectedProduct(p)}>
                       <td><strong>{p.sku}</strong></td>
-                      <td>{p.product_name}</td>
+                      <td>{p.name}</td>
                       <td>{p.category_name}</td>
                       <td>₹{Number(p.selling_price).toLocaleString()}</td>
                       <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
@@ -319,7 +319,7 @@ export default function ProductsPage() {
               <h3>Add New Product Catalog Entry</h3>
               <form onSubmit={handleCreateProduct}>
                 <input placeholder="SKU (e.g. SOF-001)" value={newProd.sku} onChange={(e) => setNewProd({ ...newProd, sku: e.target.value })} required />
-                <input placeholder="Product Name" value={newProd.product_name} onChange={(e) => setNewProd({ ...newProd, product_name: e.target.value })} required />
+                <input placeholder="Product Name" value={newProd.name} onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} required />
                 <input placeholder="Category" value={newProd.category_name} onChange={(e) => setNewProd({ ...newProd, category_name: e.target.value })} required />
                 <input type="number" step="0.01" placeholder="Selling Price (₹)" value={newProd.selling_price} onChange={(e) => setNewProd({ ...newProd, selling_price: e.target.value })} required />
                 <input type="number" placeholder="Min Stock Alert Level" value={newProd.min_stock_level} onChange={(e) => setNewProd({ ...newProd, min_stock_level: e.target.value })} required />
@@ -336,7 +336,7 @@ export default function ProductsPage() {
         {showRestockModal && (
           <div className="modal-overlay">
             <div className="modal">
-              <h3>Restock Batch: {selectedProduct.product_name}</h3>
+              <h3>Restock Batch: {selectedProduct.name}</h3>
               <form onSubmit={handleRestock}>
                 <input type="number" placeholder="Quantity Received" value={restock.quantity} onChange={(e) => setRestock({ ...restock, quantity: e.target.value })} required />
                 <input type="number" step="0.01" placeholder="Purchase Cost Per Unit (₹)" value={restock.purchase_cost} onChange={(e) => setRestock({ ...restock, purchase_cost: e.target.value })} required />
