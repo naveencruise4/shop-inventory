@@ -15,27 +15,24 @@ export default function POSPage() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
-  
-  // New Customer Form State
   const [newCust, setNewCust] = useState({ name: '', phone: '', email: '' });
 
   // POS Cart State
   const [cart, setCart] = useState([]);
+  const [customGrandTotal, setCustomGrandTotal] = useState(''); // Order-level total override
   
-  // Product Search & Dropdown State
+  // Search & Dropdown State
   const [searchTerm, setSearchTerm] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef(null);
   const customerDropdownRef = useRef(null);
   
-  // Checkout Processing State
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   useEffect(() => {
     fetchProducts();
     fetchCustomers();
 
-    // Close dropdowns on outside click
     const handleClickOutside = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setShowDropdown(false);
@@ -58,19 +55,16 @@ export default function POSPage() {
     if (data) setCustomers(data);
   };
 
-  // Filter products for POS search bar
   const filteredProducts = products.filter(p =>
     p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.sku?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Filter customers based on name or phone
   const filteredCustomers = customers.filter(c =>
     c.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
     c.phone?.includes(customerSearch)
   );
 
-  // Add product to cart or increment quantity if already exists
   const addToCart = (product) => {
     if (product.available_stock <= 0) {
       alert('This product is out of stock!');
@@ -91,7 +85,8 @@ export default function POSPage() {
       setCart([...cart, {
         ...product,
         quantity: 1,
-        price: product.selling_price
+        originalPrice: product.selling_price,
+        price: product.selling_price // Negotiable price
       }]);
     }
     setSearchTerm('');
@@ -112,15 +107,48 @@ export default function POSPage() {
     }).filter(Boolean));
   };
 
-  const removeFromCart = (id) => {
-    setCart(cart.filter(item => item.id !== id));
+  // Handle individual item price change (Bargaining)
+  const handleItemPriceChange = (id, newPriceVal) => {
+    const newPrice = Number(newPriceVal);
+    setCart(cart.map(item => item.id === id ? { ...item, price: isNaN(newPrice) ? 0 : newPrice } : item));
+    setCustomGrandTotal(''); // Reset custom total when individual items change manually
   };
 
-  const calculateTotal = () => {
+  const removeFromCart = (id) => {
+    setCart(cart.filter(item => item.id !== id));
+    setCustomGrandTotal('');
+  };
+
+  // Calculate standard subtotal sum
+  const calculateOriginalSubtotal = () => {
+    return cart.reduce((sum, item) => sum + (Number(item.originalPrice) * Number(item.quantity)), 0);
+  };
+
+  const calculateCurrentSubtotal = () => {
     return cart.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
   };
 
-  // Create New Customer On-the-Fly
+  // Handle Order-Level Total Adjustment (Auto-adjusts item prices proportionally)
+  const handleCustomTotalChange = (val) => {
+    setCustomGrandTotal(val);
+    const newTotal = Number(val);
+    const currentSub = calculateCurrentSubtotal();
+
+    if (!isNaN(newTotal) && newTotal > 0 && currentSub > 0) {
+      const ratio = newTotal / currentSub;
+      // Proportional distribution across items
+      setCart(cart.map(item => ({
+        ...item,
+        price: Number((item.price * ratio).toFixed(2))
+      })));
+    }
+  };
+
+  const getFinalTotal = () => {
+    const custom = Number(customGrandTotal);
+    return (!isNaN(custom) && custom > 0) ? custom : calculateCurrentSubtotal();
+  };
+
   const handleCreateCustomer = async (e) => {
     e.preventDefault();
     const { data: shops } = await supabase.from('shops').select('id').limit(1);
@@ -143,15 +171,13 @@ export default function POSPage() {
       return;
     }
 
-    // Refresh customers list and auto-select new customer
     await fetchCustomers();
     setSelectedCustomer(newCustomerData);
-    setCustomerSearch(newCustomerData.name);
+    setCustomerSearch(`${newCustomerData.name} (${newCustomerData.phone})`);
     setShowNewCustomerModal(false);
     setNewCust({ name: '', phone: '', email: '' });
   };
 
-  // Handle Checkout Process
   const handleCheckout = async () => {
     if (cart.length === 0) return;
     setIsCheckingOut(true);
@@ -166,12 +192,14 @@ export default function POSPage() {
         return;
       }
 
+      const finalTotal = getFinalTotal();
+
       // 1. Insert Master Sale Record
       const { data: saleData, error: saleErr } = await supabase.from('sales').insert([{
         shop_id: currentShopId,
         customer_id: selectedCustomer?.id || null,
         sale_status: 'completed',
-        total_amount: calculateTotal()
+        total_amount: finalTotal
       }]).select().single();
 
       if (saleErr) throw saleErr;
@@ -184,7 +212,7 @@ export default function POSPage() {
           product_id: item.id,
           sku: item.sku,
           quantity: item.quantity,
-          price: item.price
+          price: item.price // Saves negotiated/adjusted price
         }]);
 
         const newStock = item.total_stock - item.quantity;
@@ -195,6 +223,7 @@ export default function POSPage() {
 
       alert('Checkout completed successfully!');
       setCart([]);
+      setCustomGrandTotal('');
       setSelectedCustomer(null);
       setCustomerSearch('');
       fetchProducts();
@@ -270,7 +299,6 @@ export default function POSPage() {
             <div className="card cart-card">
               <h3>Current Order Cart</h3>
               
-              {/* Searchable Customer Section */}
               <div className="customer-select-section" ref={customerDropdownRef}>
                 <label>Customer (Search Name or Mobile)</label>
                 <div className="customer-input-row">
@@ -326,7 +354,7 @@ export default function POSPage() {
                       <tr>
                         <th>Item</th>
                         <th>Qty</th>
-                        <th>Price</th>
+                        <th>Bargained Price (₹)</th>
                         <th>Subtotal</th>
                         <th></th>
                       </tr>
@@ -345,8 +373,20 @@ export default function POSPage() {
                               <button onClick={() => updateCartQuantity(item.id, 1)}>+</button>
                             </div>
                           </td>
-                          <td>₹{item.price}</td>
-                          <td>₹{item.price * item.quantity}</td>
+                          <td>
+                            <div className="price-edit-cell">
+                              <input 
+                                type="number" 
+                                value={item.price} 
+                                onChange={(e) => handleItemPriceChange(item.id, e.target.value)}
+                                className="table-price-input"
+                              />
+                              {item.price !== item.originalPrice && (
+                                <span className="original-price-strike">₹{item.originalPrice}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td>₹{(item.price * item.quantity).toFixed(2)}</td>
                           <td>
                             <button className="remove-btn" onClick={() => removeFromCart(item.id)}>✕</button>
                           </td>
@@ -358,10 +398,27 @@ export default function POSPage() {
               </div>
 
               <div className="cart-summary">
-                <div className="total-row">
-                  <span>Total Amount:</span>
-                  <span className="grand-total">₹{calculateTotal().toFixed(2)}</span>
+                <div className="summary-row">
+                  <span>Original Subtotal:</span>
+                  <span className="strike-text">₹{calculateOriginalSubtotal().toFixed(2)}</span>
                 </div>
+                
+                <div className="summary-row adjustment-row">
+                  <span>Override Total / Final Amount (₹):</span>
+                  <input 
+                    type="number" 
+                    placeholder="Enter custom total..." 
+                    value={customGrandTotal}
+                    onChange={(e) => handleCustomTotalChange(e.target.value)}
+                    className="custom-total-input"
+                  />
+                </div>
+
+                <div className="total-row">
+                  <span>Final Payable Amount:</span>
+                  <span className="grand-total">₹{getFinalTotal().toFixed(2)}</span>
+                </div>
+
                 <button 
                   className="checkout-btn" 
                   disabled={cart.length === 0 || isCheckingOut}
@@ -374,34 +431,19 @@ export default function POSPage() {
           </div>
         </div>
 
-        {/* ================= MODAL: CREATE NEW CUSTOMER ================= */}
         {showNewCustomerModal && (
           <div className="modal-overlay">
             <div className="modal">
               <h3>Add New Customer</h3>
               <form onSubmit={handleCreateCustomer}>
                 <label>Customer Name</label>
-                <input 
-                  placeholder="Full name" 
-                  value={newCust.name} 
-                  onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} 
-                  required 
-                />
+                <input placeholder="Full name" value={newCust.name} onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} required />
                 
                 <label>Mobile Number</label>
-                <input 
-                  placeholder="Phone number" 
-                  value={newCust.phone} 
-                  onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} 
-                />
+                <input placeholder="Phone number" value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} />
 
                 <label>Email Address (Optional)</label>
-                <input 
-                  type="email"
-                  placeholder="Email address" 
-                  value={newCust.email} 
-                  onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} 
-                />
+                <input type="email" placeholder="Email address" value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} />
                 
                 <div className="modal-actions">
                   <button type="submit" className="action-btn">Save & Select Customer</button>
@@ -450,15 +492,24 @@ export default function POSPage() {
         .cart-items-wrapper { min-height: 200px; max-height: 320px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; }
         .cart-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .cart-table th { background: #f1f5f9; padding: 8px 10px; text-align: left; color: #475569; }
-        .cart-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; }
+        .cart-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
         .empty-cart-text { text-align: center; color: #94a3b8; padding: 40px 0; margin: 0; font-size: 13px; }
 
         .qty-controls { display: flex; align-items: center; gap: 6px; }
         .qty-controls button { background: #e2e8f0; border: none; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; font-weight: bold; }
         .remove-btn { background: none; border: none; color: #ef4444; cursor: pointer; font-weight: bold; font-size: 14px; }
 
-        .cart-summary { border-top: 1px solid #e2e8f0; padding-top: 14px; }
-        .total-row { display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: bold; margin-bottom: 14px; color: #0f172a; }
+        .price-edit-cell { display: flex; flex-direction: column; gap: 2px; }
+        .table-price-input { width: 80px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
+        .original-price-strike { font-size: 11px; color: #94a3b8; text-decoration: line-through; }
+
+        .cart-summary { border-top: 1px solid #e2e8f0; padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+        .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #64748b; }
+        .strike-text { text-decoration: line-through; color: #94a3b8; }
+        .adjustment-row { margin-bottom: 4px; }
+        .custom-total-input { width: 120px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; text-align: right; }
+
+        .total-row { display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: bold; margin-top: 4px; margin-bottom: 10px; color: #0f172a; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
         .grand-total { font-size: 20px; color: #16a34a; }
         .checkout-btn { width: 100%; background: #16a34a; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; }
         .checkout-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
