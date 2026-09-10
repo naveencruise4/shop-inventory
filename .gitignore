@@ -1,0 +1,2 @@
+# Ignore all files ending in .log anywhere in the project
+.env.local
