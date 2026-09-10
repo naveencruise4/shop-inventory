@@ -9,15 +9,24 @@ import { supabase } from '@/lib/supabaseClient';
 export default function POSPage() {
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [selectedCustomer, setSelectedCustomer] = useState('');
   
+  // Selected Customer State
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
+  
+  // New Customer Form State
+  const [newCust, setNewCust] = useState({ name: '', phone: '', email: '' });
+
   // POS Cart State
   const [cart, setCart] = useState([]);
   
-  // Search & Dropdown State
+  // Product Search & Dropdown State
   const [searchTerm, setSearchTerm] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef(null);
+  const customerDropdownRef = useRef(null);
   
   // Checkout Processing State
   const [isCheckingOut, setIsCheckingOut] = useState(false);
@@ -26,10 +35,13 @@ export default function POSPage() {
     fetchProducts();
     fetchCustomers();
 
-    // Close dropdown on outside click
+    // Close dropdowns on outside click
     const handleClickOutside = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setShowDropdown(false);
+      }
+      if (customerDropdownRef.current && !customerDropdownRef.current.contains(e.target)) {
+        setShowCustomerDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -50,6 +62,12 @@ export default function POSPage() {
   const filteredProducts = products.filter(p =>
     p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.sku?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Filter customers based on name or phone
+  const filteredCustomers = customers.filter(c =>
+    c.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
+    c.phone?.includes(customerSearch)
   );
 
   // Add product to cart or increment quantity if already exists
@@ -102,6 +120,37 @@ export default function POSPage() {
     return cart.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
   };
 
+  // Create New Customer On-the-Fly
+  const handleCreateCustomer = async (e) => {
+    e.preventDefault();
+    const { data: shops } = await supabase.from('shops').select('id').limit(1);
+    const currentShopId = shops?.[0]?.id;
+
+    if (!currentShopId) {
+      alert('Error: No active shop found.');
+      return;
+    }
+
+    const { data: newCustomerData, error } = await supabase.from('customers').insert([{
+      shop_id: currentShopId,
+      name: newCust.name,
+      phone: newCust.phone,
+      email: newCust.email
+    }]).select().single();
+
+    if (error) {
+      alert(`Failed to create customer: ${error.message}`);
+      return;
+    }
+
+    // Refresh customers list and auto-select new customer
+    await fetchCustomers();
+    setSelectedCustomer(newCustomerData);
+    setCustomerSearch(newCustomerData.name);
+    setShowNewCustomerModal(false);
+    setNewCust({ name: '', phone: '', email: '' });
+  };
+
   // Handle Checkout Process
   const handleCheckout = async () => {
     if (cart.length === 0) return;
@@ -120,7 +169,7 @@ export default function POSPage() {
       // 1. Insert Master Sale Record
       const { data: saleData, error: saleErr } = await supabase.from('sales').insert([{
         shop_id: currentShopId,
-        customer_id: selectedCustomer || null,
+        customer_id: selectedCustomer?.id || null,
         sale_status: 'completed',
         total_amount: calculateTotal()
       }]).select().single();
@@ -129,7 +178,6 @@ export default function POSPage() {
 
       // 2. Insert Sale Items & Deduct Stock
       for (const item of cart) {
-        // Insert item record
         await supabase.from('sale_items').insert([{
           shop_id: currentShopId,
           sale_id: saleData.id,
@@ -139,7 +187,6 @@ export default function POSPage() {
           price: item.price
         }]);
 
-        // Deduct from physical stock quantity
         const newStock = item.total_stock - item.quantity;
         await supabase.from('productsinfo').update({
           stock_quantity: newStock
@@ -148,7 +195,8 @@ export default function POSPage() {
 
       alert('Checkout completed successfully!');
       setCart([]);
-      setSelectedCustomer('');
+      setSelectedCustomer(null);
+      setCustomerSearch('');
       fetchProducts();
     } catch (err) {
       alert(`Checkout failed: ${err.message}`);
@@ -204,7 +252,6 @@ export default function POSPage() {
                 )}
               </div>
 
-              {/* Quick Grid or Category shortcuts if needed */}
               <h4>Quick Catalog</h4>
               <div className="quick-grid">
                 {products.slice(0, 8).map(p => (
@@ -223,14 +270,51 @@ export default function POSPage() {
             <div className="card cart-card">
               <h3>Current Order Cart</h3>
               
-              <div className="customer-select-row">
-                <label>Customer (Optional)</label>
-                <select value={selectedCustomer} onChange={(e) => setSelectedCustomer(e.target.value)}>
-                  <option value="">Walk-in Customer</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.phone || 'No phone'})</option>
-                  ))}
-                </select>
+              {/* Searchable Customer Section */}
+              <div className="customer-select-section" ref={customerDropdownRef}>
+                <label>Customer (Search Name or Mobile)</label>
+                <div className="customer-input-row">
+                  <input 
+                    placeholder="Type name or mobile number..."
+                    value={customerSearch}
+                    onChange={(e) => {
+                      setCustomerSearch(e.target.value);
+                      setShowCustomerDropdown(true);
+                      if (!e.target.value) setSelectedCustomer(null);
+                    }}
+                    onFocus={() => setShowCustomerDropdown(true)}
+                    className="search-input"
+                  />
+                  {selectedCustomer && (
+                    <button className="clear-cust-btn" onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}>✕</button>
+                  )}
+                </div>
+
+                {showCustomerDropdown && customerSearch.trim() !== '' && (
+                  <div className="dropdown-list">
+                    {filteredCustomers.length > 0 ? (
+                      filteredCustomers.map(c => (
+                        <div key={c.id} className="dropdown-item" onClick={() => {
+                          setSelectedCustomer(c);
+                          setCustomerSearch(`${c.name} (${c.phone || 'No Phone'})`);
+                          setShowCustomerDropdown(false);
+                        }}>
+                          <div>
+                            <strong>{c.name}</strong> <span className="subtext">{c.phone || 'No phone'}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="dropdown-item create-new-prompt" onClick={() => {
+                        setShowCustomerDropdown(false);
+                        setNewCust({ name: customerSearch, phone: isNaN(customerSearch) ? '' : customerSearch, email: '' });
+                        setShowNewCustomerModal(true);
+                      }}>
+                        <span>🔍 Customer not found. <strong>+ Create new customer</strong></span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="cart-items-wrapper">
@@ -289,6 +373,44 @@ export default function POSPage() {
             </div>
           </div>
         </div>
+
+        {/* ================= MODAL: CREATE NEW CUSTOMER ================= */}
+        {showNewCustomerModal && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Add New Customer</h3>
+              <form onSubmit={handleCreateCustomer}>
+                <label>Customer Name</label>
+                <input 
+                  placeholder="Full name" 
+                  value={newCust.name} 
+                  onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} 
+                  required 
+                />
+                
+                <label>Mobile Number</label>
+                <input 
+                  placeholder="Phone number" 
+                  value={newCust.phone} 
+                  onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} 
+                />
+
+                <label>Email Address (Optional)</label>
+                <input 
+                  type="email"
+                  placeholder="Email address" 
+                  value={newCust.email} 
+                  onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} 
+                />
+                
+                <div className="modal-actions">
+                  <button type="submit" className="action-btn">Save & Select Customer</button>
+                  <button type="button" className="cancel-btn" onClick={() => setShowNewCustomerModal(false)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </main>
 
       <style jsx>{`
@@ -300,7 +422,7 @@ export default function POSPage() {
         .card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; height: fit-content; }
         
         .search-dropdown-container { position: relative; margin-bottom: 20px; }
-        .search-input { width: 100%; padding: 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+        .search-input { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
         .dropdown-list { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 6px; max-height: 250px; overflow-y: auto; z-index: 50; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-top: 2px; }
         .dropdown-item { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
         .dropdown-item:hover { background: #f8fafc; }
@@ -319,11 +441,13 @@ export default function POSPage() {
         .tile-stock { font-size: 11px; color: #64748b; }
 
         .cart-card { display: flex; flex-direction: column; }
-        .customer-select-row { margin-bottom: 16px; }
-        .customer-select-row label { font-size: 12px; color: #64748b; display: block; margin-bottom: 4px; }
-        .customer-select-row select { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #white; }
+        .customer-select-section { position: relative; margin-bottom: 16px; }
+        .customer-select-section label { font-size: 12px; color: #64748b; display: block; margin-bottom: 4px; }
+        .customer-input-row { display: flex; position: relative; }
+        .clear-cust-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #64748b; cursor: pointer; font-weight: bold; }
+        .create-new-prompt { color: #0284c7; background: #f0fdf4; width: 100%; justify-content: flex-start; }
 
-        .cart-items-wrapper { min-height: 220px; max-height: 350px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; }
+        .cart-items-wrapper { min-height: 200px; max-height: 320px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; }
         .cart-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .cart-table th { background: #f1f5f9; padding: 8px 10px; text-align: left; color: #475569; }
         .cart-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; }
@@ -338,6 +462,14 @@ export default function POSPage() {
         .grand-total { font-size: 20px; color: #16a34a; }
         .checkout-btn { width: 100%; background: #16a34a; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; }
         .checkout-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 400px; display: flex; flex-direction: column; gap: 10px; }
+        .modal input { padding: 10px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; box-sizing: border-box; }
+        .modal label { font-size: 12px; color: #475569; font-weight: 500; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
+        .action-btn { flex: 1; padding: 10px; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
+        .cancel-btn { flex: 1; padding: 10px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; }
       `}</style>
     </div>
   );
