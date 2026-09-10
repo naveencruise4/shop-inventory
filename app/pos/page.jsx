@@ -194,34 +194,25 @@ export default function POSPage() {
 
       const finalTotal = getFinalTotal();
 
-      // 1. Insert Master Sale Record
-      const { data: saleData, error: saleErr } = await supabase.from('sales').insert([{
-        shop_id: currentShopId,
-        customer_id: selectedCustomer?.id || null,
-        sale_status: 'completed',
-        total_amount: finalTotal
-      }]).select().single();
+      // Format cart items payload for the Postgres function
+      const itemsPayload = cart.map(item => ({
+        product_id: item.id,
+        sku: item.sku,
+        quantity: item.quantity,
+        price: item.price
+      }));
 
-      if (saleErr) throw saleErr;
+      // Call the atomic database RPC transaction
+      const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
+        p_shop_id: currentShopId,
+        p_customer_id: selectedCustomer?.id || null,
+        p_total_amount: finalTotal,
+        p_items: itemsPayload
+      });
 
-      // 2. Insert Sale Items & Deduct Stock
-      for (const item of cart) {
-        await supabase.from('sale_items').insert([{
-          shop_id: currentShopId,
-          sale_id: saleData.id,
-          product_id: item.id,
-          sku: item.sku,
-          quantity: item.quantity,
-          price: item.price // Saves negotiated/adjusted price
-        }]);
+      if (rpcError) throw rpcError;
 
-        const newStock = item.total_stock - item.quantity;
-        await supabase.from('productsinfo').update({
-          stock_quantity: newStock
-        }).eq('id', item.id);
-      }
-
-      alert('Checkout completed successfully!');
+      alert(`Checkout completed successfully! Sale ID: ${saleId}`);
       setCart([]);
       setCustomGrandTotal('');
       setSelectedCustomer(null);
