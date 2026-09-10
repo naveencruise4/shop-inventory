@@ -14,11 +14,24 @@ export default function ProductsPage() {
   
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showRestockModal, setShowRestockModal] = useState(false);
 
   // Forms State
-  const [newProd, setNewProd] = useState({ sku: '', name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
-  const [restock, setRestock] = useState({ quantity: '', purchase_price: '', avg_cost_price: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
+  const [newProd, setNewProd] = useState({
+    sku: '',
+    name: '',
+    category_name: 'General',
+    initial_quantity: '0',
+    purchase_price: '',
+    selling_price: '',
+    margin_pct: '',
+    purchase_date: new Date().toISOString().split('T')[0],
+    min_stock_level: 3
+  });
+
+  const [editProd, setEditProd] = useState({ selling_price: '', margin_pct: '' });
+  const [restock, setRestock] = useState({ quantity: '', purchase_price: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
 
   // Tab Data
   const [purchasesHistory, setPurchasesHistory] = useState([]);
@@ -58,28 +71,93 @@ export default function ProductsPage() {
     if (data) setSalesHistory(data);
   };
 
-  // Create Product Definition Only
+  // --- BIDIRECTIONAL MARGIN / SELLING PRICE CALCULATOR ---
+  const handleNewProdPriceChange = (field, val) => {
+    const cost = Number(newProd.purchase_price || 0);
+    if (field === 'selling_price') {
+      const sell = Number(val);
+      const margin = (sell && cost) ? (((sell - cost) / sell) * 100).toFixed(1) : '';
+      setNewProd({ ...newProd, selling_price: val, margin_pct: margin });
+    } else if (field === 'margin_pct') {
+      const margin = Number(val);
+      const sell = (cost && margin < 100) ? (cost / (1 - margin / 100)).toFixed(2) : '';
+      setNewProd({ ...newProd, margin_pct: val, selling_price: sell });
+    } else if (field === 'purchase_price') {
+      const newCost = Number(val);
+      const margin = Number(newProd.margin_pct);
+      const sell = (newCost && margin) ? (newCost / (1 - margin / 100)).toFixed(2) : newProd.selling_price;
+      setNewProd({ ...newProd, purchase_price: val, selling_price: sell });
+    }
+  };
+
+  const handleEditPriceChange = (field, val) => {
+    const cost = Number(selectedProduct?.avg_cost_price || 0);
+    if (field === 'selling_price') {
+      const sell = Number(val);
+      const margin = (sell && cost) ? (((sell - cost) / sell) * 100).toFixed(1) : '';
+      setEditProd({ selling_price: val, margin_pct: margin });
+    } else if (field === 'margin_pct') {
+      const margin = Number(val);
+      const sell = (cost && margin < 100) ? (cost / (1 - margin / 100)).toFixed(2) : editProd.selling_price;
+      setEditProd({ margin_pct: val, selling_price: sell });
+    }
+  };
+
+  // --- CREATE PRODUCT ---
   const handleCreateProduct = async (e) => {
     e.preventDefault();
-    const { data, error } = await supabase.from('productsinfo').insert([{
+    const initQty = Number(newProd.initial_quantity || 0);
+    const costPrice = Number(newProd.purchase_price || 0);
+
+    // 1. Insert into productsinfo
+    const { data: prodData, error: prodErr } = await supabase.from('productsinfo').insert([{
       sku: newProd.sku,
       name: newProd.name,
       category_name: newProd.category_name,
       selling_price: Number(newProd.selling_price),
       min_stock_level: Number(newProd.min_stock_level),
-      stock_quantity: 0,
-      avg_cost_price: 0
+      stock_quantity: initQty,
+      avg_cost_price: costPrice
     }]).select().single();
 
+    if (prodErr) {
+      alert(`Error creating product: ${prodErr.message}`);
+      return;
+    }
+
+    // 2. Insert initial purchase batch if quantity > 0
+    if (initQty > 0 && prodData) {
+      await supabase.from('product_purchases').insert([{
+        product_id: prodData.id,
+        quantity: initQty,
+        purchase_price: costPrice,
+        purchase_date: newProd.purchase_date
+      }]);
+    }
+
+    setShowAddModal(false);
+    setNewProd({ sku: '', name: '', category_name: 'General', initial_quantity: '0', purchase_price: '', selling_price: '', margin_pct: '', purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3 });
+    fetchProducts();
+  };
+
+  // --- EDIT PRODUCT PRICE/MARGIN ---
+  const handleUpdateProduct = async (e) => {
+    e.preventDefault();
+    if (!selectedProduct) return;
+
+    const { error } = await supabase.from('productsinfo').update({
+      selling_price: Number(editProd.selling_price)
+    }).eq('id', selectedProduct.id);
+
     if (!error) {
-      setShowAddModal(false);
-      setNewProd({ sku: '', name: '', category_name: 'General', selling_price: '', min_stock_level: 3 });
+      setShowEditModal(false);
+      const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
+      if (updated) setSelectedProduct(updated);
       fetchProducts();
-      if (data) setSelectedProduct(data);
     }
   };
 
-  // Restock & Recalculate Weighted Average Cost (WAC)
+  // --- RESTOCK INVENTORY ---
   const handleRestock = async (e) => {
     e.preventDefault();
     if (!selectedProduct) return;
@@ -89,13 +167,11 @@ export default function ProductsPage() {
     const currentQty = selectedProduct.total_stock;
     const currentAvgCost = selectedProduct.avg_cost_price;
 
-    // Weighted Average Cost Formula
     const newTotalQty = currentQty + incomingQty;
     const newAvgCost = newTotalQty > 0 
       ? ((currentQty * currentAvgCost) + (incomingQty * incomingCost)) / newTotalQty 
       : incomingCost;
 
-    // 1. Insert Purchase Batch Log
     await supabase.from('product_purchases').insert([{
       product_id: selectedProduct.id,
       quantity: incomingQty,
@@ -104,7 +180,6 @@ export default function ProductsPage() {
       purchase_date: restock.purchase_date
     }]);
 
-    // 2. Update Product Inventory & WAC
     await supabase.from('productsinfo').update({
       stock_quantity: newTotalQty,
       avg_cost_price: newAvgCost
@@ -113,16 +188,15 @@ export default function ProductsPage() {
     setShowRestockModal(false);
     setRestock({ quantity: '', purchase_price: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
     
-    // Refresh
     const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
     if (updated) setSelectedProduct(updated);
     fetchProducts();
   };
 
   const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.sku.toLowerCase().includes(search.toLowerCase()) ||
-    p.category_name.toLowerCase().includes(search.toLowerCase())
+    p.name?.toLowerCase().includes(search.toLowerCase()) ||
+    p.sku?.toLowerCase().includes(search.toLowerCase()) ||
+    p.category_name?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -140,7 +214,16 @@ export default function ProductsPage() {
                   <h2>{selectedProduct.name}</h2>
                   <span className="sku-badge">SKU: {selectedProduct.sku}</span>
                 </div>
-                <button className="action-btn" onClick={() => setShowRestockModal(true)}>+ Restock Inventory</button>
+                <div className="btn-group">
+                  <button className="secondary-btn" onClick={() => {
+                    const cost = selectedProduct.avg_cost_price || 0;
+                    const sell = selectedProduct.selling_price || 0;
+                    const margin = (sell && cost) ? (((sell - cost) / sell) * 100).toFixed(1) : '';
+                    setEditProd({ selling_price: sell, margin_pct: margin });
+                    setShowEditModal(true);
+                  }}>✎ Edit Price / Margin</button>
+                  <button className="action-btn" onClick={() => setShowRestockModal(true)}>+ Restock Inventory</button>
+                </div>
               </div>
 
               <div className="metrics-bar">
@@ -183,7 +266,7 @@ export default function ProductsPage() {
                   <div className="card">
                     <h4>Product Info</h4>
                     <p><strong>Category:</strong> {selectedProduct.category_name}</p>
-                    <p><strong>Stock Status:</strong> <span className={`status-tag ${selectedProduct.status.toLowerCase().replace(/\s+/g, '-')}`}>{selectedProduct.status}</span></p>
+                    <p><strong>Stock Status:</strong> <span className={`status-tag ${selectedProduct.status?.toLowerCase().replace(/\s+/g, '-')}`}>{selectedProduct.status}</span></p>
                     <p><strong>Min Reorder Level:</strong> {selectedProduct.min_stock_level || 3} units</p>
                   </div>
                   <div className="card">
@@ -300,7 +383,7 @@ export default function ProductsPage() {
                       <td>₹{Number(p.selling_price).toLocaleString()}</td>
                       <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
                       <td>
-                        <span className={`status-tag ${p.status.toLowerCase().replace(/\s+/g, '-')}`}>
+                        <span className={`status-tag ${p.status?.toLowerCase().replace(/\s+/g, '-')}`}>
                           {p.status}
                         </span>
                       </td>
@@ -321,11 +404,49 @@ export default function ProductsPage() {
                 <input placeholder="SKU (e.g. SOF-001)" value={newProd.sku} onChange={(e) => setNewProd({ ...newProd, sku: e.target.value })} required />
                 <input placeholder="Product Name" value={newProd.name} onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} required />
                 <input placeholder="Category" value={newProd.category_name} onChange={(e) => setNewProd({ ...newProd, category_name: e.target.value })} required />
-                <input type="number" step="0.01" placeholder="Selling Price (₹)" value={newProd.selling_price} onChange={(e) => setNewProd({ ...newProd, selling_price: e.target.value })} required />
+                
+                <div className="form-row">
+                  <input type="number" placeholder="Initial Qty" value={newProd.initial_quantity} onChange={(e) => setNewProd({ ...newProd, initial_quantity: e.target.value })} required />
+                  <input type="number" step="0.01" placeholder="Purchase Price (₹)" value={newProd.purchase_price} onChange={(e) => handleNewProdPriceChange('purchase_price', e.target.value)} required />
+                </div>
+
+                <div className="form-row">
+                  <input type="number" step="0.01" placeholder="Selling Price (₹)" value={newProd.selling_price} onChange={(e) => handleNewProdPriceChange('selling_price', e.target.value)} required />
+                  <input type="number" step="0.1" placeholder="Margin %" value={newProd.margin_pct} onChange={(e) => handleNewProdPriceChange('margin_pct', e.target.value)} required />
+                </div>
+
+                <input type="date" value={newProd.purchase_date} onChange={(e) => setNewProd({ ...newProd, purchase_date: e.target.value })} required />
                 <input type="number" placeholder="Min Stock Alert Level" value={newProd.min_stock_level} onChange={(e) => setNewProd({ ...newProd, min_stock_level: e.target.value })} required />
+                
                 <div className="modal-actions">
                   <button type="submit" className="action-btn">Save Product</button>
                   <button type="button" className="cancel-btn" onClick={() => setShowAddModal(false)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: EDIT SELLING PRICE / MARGIN ================= */}
+        {showEditModal && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Edit Price: {selectedProduct.name}</h3>
+              <p className="subtext">Cost Price: ₹{selectedProduct.avg_cost_price}</p>
+              <form onSubmit={handleUpdateProduct}>
+                <div className="form-row">
+                  <div>
+                    <label>Selling Price (₹)</label>
+                    <input type="number" step="0.01" value={editProd.selling_price} onChange={(e) => handleEditPriceChange('selling_price', e.target.value)} required />
+                  </div>
+                  <div>
+                    <label>Margin %</label>
+                    <input type="number" step="0.1" value={editProd.margin_pct} onChange={(e) => handleEditPriceChange('margin_pct', e.target.value)} required />
+                  </div>
+                </div>
+                <div className="modal-actions">
+                  <button type="submit" className="action-btn">Update Price</button>
+                  <button type="button" className="cancel-btn" onClick={() => setShowEditModal(false)}>Cancel</button>
                 </div>
               </form>
             </div>
@@ -357,6 +478,8 @@ export default function ProductsPage() {
         .content { flex: 1; padding: 24px; box-sizing: border-box; }
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .primary-btn, .action-btn { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
+        .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
+        .btn-group { display: flex; gap: 10px; }
         .filter-bar { margin-bottom: 16px; }
         .search-input { width: 100%; max-width: 400px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
         .table-wrapper { background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow-x: auto; }
@@ -372,7 +495,6 @@ export default function ProductsPage() {
         .status-tag.low { background: #fef9c3; color: #a16207; }
         .status-tag.out-of-stock { background: #fee2e2; color: #b91c1c; }
 
-        /* Details View */
         .back-btn { background: none; border: none; color: #0284c7; cursor: pointer; margin-bottom: 12px; font-size: 14px; padding: 0; }
         .header-card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; }
         .header-main { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
@@ -398,9 +520,11 @@ export default function ProductsPage() {
         .stock-box .lbl { font-size: 12px; color: #64748b; }
 
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; }
-        .modal { background: white; padding: 24px; border-radius: 8px; width: 400px; display: flex; flex-direction: column; gap: 12px; }
-        .modal input { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
-        .modal-actions { display: flex; gap: 10px; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 440px; display: flex; flex-direction: column; gap: 12px; }
+        .modal input, .modal label { width: 100%; display: block; font-size: 13px; color: #475569; }
+        .modal input { padding: 10px; margin-top: 4px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
+        .form-row { display: flex; gap: 10px; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
         .cancel-btn { flex: 1; padding: 10px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; }
       `}</style>
     </div>
