@@ -105,40 +105,55 @@ export default function ProductsPage() {
 
   // --- CREATE PRODUCT ---
   const handleCreateProduct = async (e) => {
-    e.preventDefault();
-    const initQty = Number(newProd.initial_quantity || 0);
-    const costPrice = Number(newProd.purchase_price || 0);
+  e.preventDefault();
 
-    // 1. Insert into productsinfo
-    const { data: prodData, error: prodErr } = await supabase.from('productsinfo').insert([{
-      sku: newProd.sku,
-      name: newProd.name,
-      category_name: newProd.category_name,
-      selling_price: Number(newProd.selling_price),
-      min_stock_level: Number(newProd.min_stock_level),
-      stock_quantity: initQty,
-      avg_cost_price: costPrice
-    }]).select().single();
+  // 1. Get the current logged-in user or active shop session
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  // Assuming user metadata or profile contains shop_id, 
+  // or you store it in localStorage / state during login:
+  const currentShopId = user?.user_metadata?.shop_id || localStorage.getItem('shop_id'); 
 
-    if (prodErr) {
-      alert(`Error creating product: ${prodErr.message}`);
-      return;
-    }
+  if (!currentShopId) {
+    alert('Error: No active shop found for this session.');
+    return;
+  }
 
-    // 2. Insert initial purchase batch if quantity > 0
-    if (initQty > 0 && prodData) {
-      await supabase.from('product_purchases').insert([{
-        product_id: prodData.id,
-        quantity: initQty,
-        purchase_price: costPrice,
-        purchase_date: newProd.purchase_date
-      }]);
-    }
+  const initQty = Number(newProd.initial_quantity || 0);
+  const costPrice = Number(newProd.purchase_price || 0);
 
-    setShowAddModal(false);
-    setNewProd({ sku: '', name: '', category_name: 'General', initial_quantity: '0', purchase_price: '', selling_price: '', margin_pct: '', purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3 });
-    fetchProducts();
-  };
+  // 2. Include shop_id in the payload
+  const { data: prodData, error: prodErr } = await supabase.from('productsinfo').insert([{
+    shop_id: currentShopId, // <--- Added this required field
+    sku: newProd.sku,
+    name: newProd.name,
+    category_name: newProd.category_name,
+    selling_price: Number(newProd.selling_price),
+    min_stock_level: Number(newProd.min_stock_level),
+    stock_quantity: initQty,
+    avg_cost_price: costPrice
+  }]).select().single();
+
+  if (prodErr) {
+    alert(`Error creating product: ${prodErr.message}`);
+    return;
+  }
+
+  // 3. Insert initial purchase batch if quantity > 0
+  if (initQty > 0 && prodData) {
+    await supabase.from('product_purchases').insert([{
+      shop_id: currentShopId, // <--- Also check if product_purchases requires shop_id
+      product_id: prodData.id,
+      quantity: initQty,
+      purchase_price: costPrice,
+      purchase_date: newProd.purchase_date
+    }]);
+  }
+
+  setShowAddModal(false);
+  setNewProd({ sku: '', name: '', category_name: 'General', initial_quantity: '0', purchase_price: '', selling_price: '', margin_pct: '', purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3 });
+  fetchProducts();
+};
 
   // --- EDIT PRODUCT PRICE/MARGIN ---
   const handleUpdateProduct = async (e) => {
