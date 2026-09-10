@@ -374,7 +374,7 @@ console.log('Current shop:', currentShopId);
                           <td>{new Date(s.sales?.created_at).toLocaleDateString()}</td>
                           <td>{s.sales?.customers?.name || 'Walk-in'}</td>
                           <td>{s.quantity}</td>
-                          <td>₹{s.price}</td>
+                          <td>₹{s.unit_price}</td>
                         </tr>
                       ))}
                     </tbody>
