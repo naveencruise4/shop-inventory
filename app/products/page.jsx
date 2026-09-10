@@ -107,17 +107,40 @@ export default function ProductsPage() {
   const handleCreateProduct = async (e) => {
   e.preventDefault();
 
-  // 1. Get the current logged-in user or active shop session
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  // Assuming user metadata or profile contains shop_id, 
-  // or you store it in localStorage / state during login:
-  const currentShopId = user?.user_metadata?.shop_id || localStorage.getItem('shop_id'); 
+// Get logged-in Supabase Auth user
+const {
+  data: { user },
+  error: authError
+} = await supabase.auth.getUser();
 
-  if (!currentShopId) {
-    alert('Error: No active shop found for this session.');
-    return;
-  }
+if (authError || !user) {
+  console.error('Auth error:', authError);
+  alert('You are not logged in. Please log in again.');
+  return;
+}
+
+// Get shop_id from public.users
+const { data: appUser, error: userError } = await supabase
+  .from('users')
+  .select('shop_id')
+  .eq('id', user.id)
+  .single();
+
+if (userError) {
+  console.error('Error loading user:', userError);
+  alert(`Unable to load your shop: ${userError.message}`);
+  return;
+}
+
+if (!appUser?.shop_id) {
+  console.error('No shop assigned to user:', user.id);
+  alert('No shop is assigned to this user.');
+  return;
+}
+
+const currentShopId = appUser.shop_id;
+
+console.log('Current shop:', currentShopId);
 
   const initQty = Number(newProd.initial_quantity || 0);
   const costPrice = Number(newProd.purchase_price || 0);
