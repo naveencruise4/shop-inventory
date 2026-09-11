@@ -27,22 +27,25 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // IMPORTANT: Avoid writing logic between createServerClient and
-  // supabase.auth.getUser(). A simple mistake could make it
-  // very hard to debug user sessions issues.
-
+  // IMPORTANT: Do not run logic between createServerClient and getUser()
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Routing guard (UX Layer only!)
-  if (
-    !user &&
-    !request.nextUrl.pathname.startsWith('/login') &&
-    !request.nextUrl.pathname.startsWith('/auth')
-  ) {
+  const pathname = request.nextUrl.pathname
+  const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/signup')
+
+  // 1. If user is NOT signed in and trying to access protected pages -> redirect to /login
+  if (!user && !isAuthPage && !pathname.startsWith('/auth')) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
+
+  // 2. If user IS signed in and trying to access /login or /signup -> redirect to /dashboard
+  if (user && isAuthPage) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
 
