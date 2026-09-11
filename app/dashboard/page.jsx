@@ -3,11 +3,15 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link'; // Added missing import
+import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState(null);
   const [metrics, setMetrics] = useState({
     totalSales: 0,
     totalCollections: 0,
@@ -24,8 +28,18 @@ export default function DashboardPage() {
   const fetchDashboardMetrics = async () => {
     try {
       setLoading(true);
+      setErrorMessage(null);
 
-      // Call single PostgreSQL RPC for authoritative financial data
+      // 1. Verify user session before calling RPC
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+      if (sessionError || !session) {
+        // Redirect unauthenticated user to login
+        router.push('/login');
+        return;
+      }
+
+      // 2. Call single PostgreSQL RPC with authenticated JWT
       const { data, error } = await supabase.rpc('get_dashboard_metrics');
 
       if (error) throw error;
@@ -42,6 +56,7 @@ export default function DashboardPage() {
       }
     } catch (err) {
       console.error('Failed to load dashboard metrics from PostgreSQL:', err.message);
+      setErrorMessage(err.message);
     } finally {
       setLoading(false);
     }
@@ -53,64 +68,77 @@ export default function DashboardPage() {
       <main className="content">
         <div className="top-bar">
           <h1>Business Intelligence Dashboard</h1>
-          <button className="refresh-btn" onClick={fetchDashboardMetrics}>🔄 Refresh Data</button>
+          <button className="refresh-btn" onClick={fetchDashboardMetrics}>
+            🔄 Refresh Data
+          </button>
         </div>
 
         {loading ? (
           <p className="loading-text">Fetching financial metrics from database...</p>
+        ) : errorMessage ? (
+          <div className="error-banner">
+            <p>⚠️ {errorMessage}</p>
+            <p className="sub-text">Please make sure your user profile is assigned to a shop in the database.</p>
+          </div>
         ) : (
           <div className="dashboard-grid">
-            
             <div className="metric-card primary">
               <span className="card-category">Commercial Performance</span>
               <h3>Gross Sales (Invoiced)</h3>
-              <div className="metric-value">₹{metrics.totalSales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+              <div className="metric-value">
+                ₹{metrics.totalSales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
               <p className="card-subtext">Total invoice value across all completed sales.</p>
             </div>
 
             <div className="metric-card success">
               <span className="card-category">Cash Flow Health</span>
               <h3>Collections (Cash Received)</h3>
-              <div className="metric-value">₹{metrics.totalCollections.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+              <div className="metric-value">
+                ₹{metrics.totalCollections.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
               <p className="card-subtext">Actual funds collected in register / bank.</p>
             </div>
 
             <div className="metric-card">
               <span className="card-category">Cost Accounting</span>
               <h3>Cost of Goods Sold (COGS)</h3>
-              <div className="metric-value">₹{metrics.totalCogs.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+              <div className="metric-value">
+                ₹{metrics.totalCogs.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
               <p className="card-subtext">Wholesale cost of goods sold.</p>
             </div>
 
             <div className="metric-card highlight">
               <span className="card-category">Core Profitability</span>
               <h3>Gross Profit</h3>
-              <div className="metric-value">₹{metrics.grossProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+              <div className="metric-value">
+                ₹{metrics.grossProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
               <p className="card-subtext">Sales minus COGS.</p>
             </div>
 
-            {/* PILLAR 5: Credit Risk with direct Ledger Link */}
             <div className="metric-card warning">
-                <span className="card-category">Credit Risk</span>
-                <h3>Receivables (Outstanding Dues)</h3>
-                <div className="metric-value">
-                    ₹{metrics.totalReceivables.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </div>
-                <p className="card-subtext">Uncollected credit balances owed by customers.</p>
-                
-                {/* Direct navigation link to the Ledger page */}
-                <Link href="/ledger" className="action-link">
-                    Manage & Collect Dues →
-                </Link>
+              <span className="card-category">Credit Risk</span>
+              <h3>Receivables (Outstanding Dues)</h3>
+              <div className="metric-value">
+                ₹{metrics.totalReceivables.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <p className="card-subtext">Uncollected credit balances owed by customers.</p>
+
+              <Link href="/ledger" className="action-link">
+                Manage & Collect Dues →
+              </Link>
             </div>
 
             <div className="metric-card">
               <span className="card-category">Asset Valuation</span>
               <h3>Current Inventory Value</h3>
-              <div className="metric-value">₹{metrics.inventoryValue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+              <div className="metric-value">
+                ₹{metrics.inventoryValue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
               <p className="card-subtext">Wholesale value of active shelf inventory.</p>
             </div>
-
           </div>
         )}
       </main>
@@ -118,144 +146,164 @@ export default function DashboardPage() {
       <style jsx>{`
         /* Layout & Main Container */
         .layout {
-            display: flex;
-            min-height: 100vh;
-            background: #f8fafc;
+          display: flex;
+          min-height: 100vh;
+          background: #f8fafc;
         }
 
         .content {
-            flex: 1;
-            padding: 24px;
-            box-sizing: border-box;
+          flex: 1;
+          padding: 24px;
+          box-sizing: border-box;
         }
 
         /* Header & Action Controls */
         .top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 24px;
         }
 
         .refresh-btn {
-            background: #0f172a;
-            color: #ffffff;
-            border: none;
-            padding: 8px 14px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 500;
-            transition: background 0.2s ease;
+          background: #0f172a;
+          color: #ffffff;
+          border: none;
+          padding: 8px 14px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 13px;
+          font-weight: 500;
+          transition: background 0.2s ease;
         }
 
         .refresh-btn:hover {
-            background: #1e293b;
+          background: #1e293b;
         }
 
         /* Dashboard Metrics Grid */
         .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 20px;
         }
 
         /* Base Metric Card */
         .metric-card {
-            background: #ffffff;
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+          background: #ffffff;
+          padding: 20px;
+          border-radius: 8px;
+          border: 1px solid #e2e8f0;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
         }
 
         /* Metric Card Variants */
         .metric-card.primary {
-            border-left: 4px solid #0284c7;
+          border-left: 4px solid #0284c7;
         }
 
         .metric-card.success {
-            border-left: 4px solid #16a34a;
+          border-left: 4px solid #16a34a;
         }
 
         .metric-card.highlight {
-            border-left: 4px solid #9333ea;
-            background: #faf5ff;
+          border-left: 4px solid #9333ea;
+          background: #faf5ff;
         }
 
         .metric-card.warning {
-            border-left: 4px solid #d97706;
+          border-left: 4px solid #d97706;
         }
 
         /* Card Content Typography */
         .card-category {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-weight: 700;
-            color: #64748b;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          font-weight: 700;
+          color: #64748b;
         }
 
         .metric-card h3 {
-            margin: 0;
-            font-size: 15px;
-            color: #334155;
-            font-weight: 600;
+          margin: 0;
+          font-size: 15px;
+          color: #334155;
+          font-weight: 600;
         }
 
         .metric-value {
-            font-size: 24px;
-            font-weight: 700;
-            color: #0f172a;
+          font-size: 24px;
+          font-weight: 700;
+          color: #0f172a;
         }
 
         .card-subtext {
-            font-size: 12px;
-            color: #64748b;
-            margin: 0;
+          font-size: 12px;
+          color: #64748b;
+          margin: 0;
         }
 
         .loading-text {
-            color: #64748b;
-            font-size: 14px;
+          color: #64748b;
+          font-size: 14px;
         }
 
-        /* Action Links & Navigation (e.g. Dues Ledger Link) */
+        .error-banner {
+          background: #fef2f2;
+          border: 1px solid #fca5a5;
+          color: #991b1b;
+          padding: 16px;
+          border-radius: 8px;
+        }
+
+        .error-banner p {
+          margin: 0;
+          font-weight: 600;
+        }
+
+        .error-banner .sub-text {
+          margin-top: 4px;
+          font-size: 13px;
+          font-weight: normal;
+          color: #7f1d1d;
+        }
+
+        /* Action Links & Navigation */
         :global(.action-link) {
-            margin-top: 10px;
-            display: inline-block;
-            font-size: 12px;
-            font-weight: 700;
-            color: #b45309;
-            text-decoration: none;
-            transition: color 0.15s ease;
+          margin-top: 10px;
+          display: inline-block;
+          font-size: 12px;
+          font-weight: 700;
+          color: #b45309;
+          text-decoration: none;
+          transition: color 0.15s ease;
         }
 
         :global(.action-link:hover) {
-            color: #92400e;
-            text-decoration: underline;
+          color: #92400e;
+          text-decoration: underline;
         }
 
         /* Mobile Responsive Tweaks */
         @media (max-width: 640px) {
-            .content {
+          .content {
             padding: 16px;
-            }
+          }
 
-            .top-bar {
+          .top-bar {
             flex-direction: column;
             align-items: flex-start;
             gap: 12px;
-            }
+          }
 
-            .dashboard-grid {
+          .dashboard-grid {
             grid-template-columns: 1fr;
-            }
+          }
         }
-        `}</style>
+      `}</style>
     </div>
   );
 }
