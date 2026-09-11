@@ -48,9 +48,28 @@ export default function ProductsPage() {
     }
   }, [selectedProduct, activeTab]);
 
-  const fetchProducts = async () => {
-    const { data } = await supabase.from('vw_product_stock').select('*');
+const fetchProducts = async () => {
+    // 1. Get the current authenticated user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 2. Get the shop_id assigned to this user
+    const { data: appUser } = await supabase
+      .from('users')
+      .select('shop_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!appUser?.shop_id) return;
+
+    // 3. Fetch products strictly scoped to this shop
+    const { data, error } = await supabase
+      .from('vw_product_stock')
+      .select('*')
+      .eq('shop_id', appUser.shop_id); // <--- Crucial tenant isolation filter
+
     if (data) setProducts(data);
+    if (error) console.error('Error fetching products:', error);
   };
 
   const fetchPurchaseHistory = async (productId) => {
