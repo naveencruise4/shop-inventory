@@ -9,10 +9,11 @@ export default function Sidebar() {
   const router = useRouter();
 
   const navItems = [
-    { label: 'Dashboard', href: '/dashboard' },
-    { label: 'Products', href: '/products' },
-    { label: 'POS', href: '/pos' },
-    { label: 'Orders', href: '/orders' },
+    { label: '📊 Dashboard', href: '/dashboard' },
+    { label: '🛒 POS', href: '/pos' },
+    { label: '📦 Products', href: '/products' },
+    { label: '📒 Orders', href: '/orders' },
+    { label: '📒 Ledger & Dues', href: '/ledger' }, // Added here
   ];
 
   const handleLogout = async () => {
@@ -65,7 +66,7 @@ export default function Sidebar() {
         nav {
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 8px;
           flex: 1;
         }
 
@@ -125,11 +126,13 @@ export default function Sidebar() {
             flex-direction: row;
             gap: 5px;
             flex: initial;
+            overflow-x: auto;
           }
 
           :global(.nav-item) {
             padding: 6px 10px;
             font-size: 13px;
+            white-space: nowrap;
           }
 
           .logout-section {

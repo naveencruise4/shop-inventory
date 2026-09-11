@@ -89,11 +89,19 @@ export default function DashboardPage() {
               <p className="card-subtext">Sales minus COGS.</p>
             </div>
 
+            {/* PILLAR 5: Credit Risk with direct Ledger Link */}
             <div className="metric-card warning">
-              <span className="card-category">Credit Risk</span>
-              <h3>Receivables (Outstanding Dues)</h3>
-              <div className="metric-value">₹{metrics.totalReceivables.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-              <p className="card-subtext">Uncollected credit balances owed by customers.</p>
+                <span className="card-category">Credit Risk</span>
+                <h3>Receivables (Outstanding Dues)</h3>
+                <div className="metric-value">
+                    ₹{metrics.totalReceivables.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+                <p className="card-subtext">Uncollected credit balances owed by customers.</p>
+                
+                {/* Direct navigation link to the Ledger page */}
+                <Link href="/ledger" className="action-link">
+                    Manage & Collect Dues →
+                </Link>
             </div>
 
             <div className="metric-card">
@@ -108,24 +116,146 @@ export default function DashboardPage() {
       </main>
 
       <style jsx>{`
-        .layout { display: flex; min-height: 100vh; background: #f8fafc; }
-        .content { flex: 1; padding: 24px; box-sizing: border-box; }
-        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-        .refresh-btn { background: #0f172a; color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
-        
-        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        .metric-card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .metric-card.primary { border-left: 4px solid #0284c7; }
-        .metric-card.success { border-left: 4px solid #16a34a; }
-        .metric-card.highlight { border-left: 4px solid #9333ea; background: #faf5ff; }
-        .metric-card.warning { border-left: 4px solid #d97706; }
+        /* Layout & Main Container */
+        .layout {
+            display: flex;
+            min-height: 100vh;
+            background: #f8fafc;
+        }
 
-        .card-category { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; color: #64748b; }
-        .metric-card h3 { margin: 0; font-size: 15px; color: #334155; font-weight: 600; }
-        .metric-value { font-size: 24px; font-weight: bold; color: #0f172a; }
-        .card-subtext { font-size: 12px; color: #64748b; margin: 0; }
-        .loading-text { color: #64748b; font-size: 14px; }
-      `}</style>
+        .content {
+            flex: 1;
+            padding: 24px;
+            box-sizing: border-box;
+        }
+
+        /* Header & Action Controls */
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .refresh-btn {
+            background: #0f172a;
+            color: #ffffff;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background 0.2s ease;
+        }
+
+        .refresh-btn:hover {
+            background: #1e293b;
+        }
+
+        /* Dashboard Metrics Grid */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        /* Base Metric Card */
+        .metric-card {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Metric Card Variants */
+        .metric-card.primary {
+            border-left: 4px solid #0284c7;
+        }
+
+        .metric-card.success {
+            border-left: 4px solid #16a34a;
+        }
+
+        .metric-card.highlight {
+            border-left: 4px solid #9333ea;
+            background: #faf5ff;
+        }
+
+        .metric-card.warning {
+            border-left: 4px solid #d97706;
+        }
+
+        /* Card Content Typography */
+        .card-category {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 700;
+            color: #64748b;
+        }
+
+        .metric-card h3 {
+            margin: 0;
+            font-size: 15px;
+            color: #334155;
+            font-weight: 600;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .card-subtext {
+            font-size: 12px;
+            color: #64748b;
+            margin: 0;
+        }
+
+        .loading-text {
+            color: #64748b;
+            font-size: 14px;
+        }
+
+        /* Action Links & Navigation (e.g. Dues Ledger Link) */
+        :global(.action-link) {
+            margin-top: 10px;
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 700;
+            color: #b45309;
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }
+
+        :global(.action-link:hover) {
+            color: #92400e;
+            text-decoration: underline;
+        }
+
+        /* Mobile Responsive Tweaks */
+        @media (max-width: 640px) {
+            .content {
+            padding: 16px;
+            }
+
+            .top-bar {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+            }
+
+            .dashboard-grid {
+            grid-template-columns: 1fr;
+            }
+        }
+        `}</style>
     </div>
   );
 }

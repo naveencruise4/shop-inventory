@@ -178,52 +178,62 @@ export default function POSPage() {
     setNewCust({ name: '', phone: '', email: '' });
   };
 
-  const handleCheckout = async () => {
-    if (cart.length === 0) return;
-    setIsCheckingOut(true);
+ const [amountPaid, setAmountPaid] = useState(''); // Can be linked to an input, or left blank for full payment
+const [paymentMethod, setPaymentMethod] = useState('cash');
 
-    try {
-      const { data: shops } = await supabase.from('shops').select('id').limit(1);
-      const currentShopId = shops?.[0]?.id;
+const handleCheckout = async () => {
+  if (cart.length === 0) return;
+  setIsCheckingOut(true);
 
-      if (!currentShopId) {
-        alert('Error: No active shop found.');
-        setIsCheckingOut(false);
-        return;
-      }
+  try {
+    const { data: shops } = await supabase.from('shops').select('id').limit(1);
+    const currentShopId = shops?.[0]?.id;
 
-      const finalTotal = getFinalTotal();
-
-      // Format cart items payload for the Postgres function
-      const itemsPayload = cart.map(item => ({
-        product_id: item.id,
-        sku: item.sku,
-        quantity: item.quantity,
-        price: item.price
-      }));
-
-      // Call the atomic database RPC transaction
-      const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
-        p_shop_id: currentShopId,
-        p_customer_id: selectedCustomer?.id || null,
-        p_total_amount: finalTotal,
-        p_items: itemsPayload
-      });
-
-      if (rpcError) throw rpcError;
-
-      alert(`Checkout completed successfully! Sale ID: ${saleId}`);
-      setCart([]);
-      setCustomGrandTotal('');
-      setSelectedCustomer(null);
-      setCustomerSearch('');
-      fetchProducts();
-    } catch (err) {
-      alert(`Checkout failed: ${err.message}`);
-    } finally {
+    if (!currentShopId) {
+      alert('Error: No active shop found.');
       setIsCheckingOut(false);
+      return;
     }
-  };
+
+    const finalTotal = getFinalTotal();
+
+    // If user entered a specific partial/advance amount, use it.
+    // Otherwise, default to full payment (finalTotal).
+    const actualPaidAmount = amountPaid !== '' ? Number(amountPaid) : finalTotal;
+
+    // Format cart items payload for the Postgres function
+    const itemsPayload = cart.map(item => ({
+      product_id: item.id,
+      sku: item.sku,
+      quantity: item.quantity,
+      price: item.price
+    }));
+
+    // Call the updated complete_sale RPC transaction
+    const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
+      p_shop_id: currentShopId,
+      p_customer_id: selectedCustomer?.id || null,
+      p_total_amount: finalTotal,
+      p_amount_paid: actualPaidAmount,
+      p_payment_method: paymentMethod || 'cash',
+      p_items: itemsPayload
+    });
+
+    if (rpcError) throw rpcError;
+
+    alert(`Checkout completed successfully! Sale ID: ${saleId}`);
+    setCart([]);
+    setCustomGrandTotal('');
+    setAmountPaid('');
+    setSelectedCustomer(null);
+    setCustomerSearch('');
+    fetchProducts();
+  } catch (err) {
+    alert(`Checkout failed: ${err.message}`);
+  } finally {
+    setIsCheckingOut(false);
+  }
+};
 
   return (
     <div className="layout">
