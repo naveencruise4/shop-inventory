@@ -3,10 +3,12 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function SettingsPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -125,6 +127,11 @@ export default function SettingsPage() {
     }
   };
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
+
   if (loading) {
     return (
       <div className="layout">
@@ -149,8 +156,8 @@ export default function SettingsPage() {
             <p className="subtext">Manage your active business name, location, and communication details.</p>
             
             <form onSubmit={handleUpdateShop} className="settings-form">
-              <div>
-                <label>Shop Name</label>
+              <div className="form-group">
+                <label>Shop Name <span className="required">*</span></label>
                 <input 
                   type="text" 
                   value={shopData.name} 
@@ -159,7 +166,7 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div>
+              <div className="form-group">
                 <label>Business Phone Number</label>
                 <input 
                   type="text" 
@@ -169,7 +176,7 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div>
+              <div className="form-group">
                 <label>Shop Address</label>
                 <textarea 
                   rows="3" 
@@ -179,13 +186,14 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div>
-                <label>Default Currency Symbol</label>
+              <div className="form-group">
+                <label>Default Currency Symbol <span className="required">*</span></label>
                 <input 
                   type="text" 
                   value={shopData.currency} 
                   onChange={(e) => setShopData({ ...shopData, currency: e.target.value })} 
                   maxLength="5" 
+                  required 
                 />
               </div>
 
@@ -201,8 +209,8 @@ export default function SettingsPage() {
             <p className="subtext">Signed in as: <strong>{userEmail}</strong></p>
 
             <form onSubmit={handleUpdatePassword} className="settings-form">
-              <div>
-                <label>New Password</label>
+              <div className="form-group">
+                <label>New Password <span className="required">*</span></label>
                 <input 
                   type="password" 
                   value={passwords.newPassword} 
@@ -212,8 +220,8 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div>
-                <label>Confirm New Password</label>
+              <div className="form-group">
+                <label>Confirm New Password <span className="required">*</span></label>
                 <input 
                   type="password" 
                   value={passwords.confirmPassword} 
@@ -234,24 +242,55 @@ export default function SettingsPage() {
               </button>
             </form>
           </div>
+
+          {/* Account Session / Mobile Logout Card */}
+          <div className="card logout-card">
+            <h3>Account Session</h3>
+            <p className="subtext">Sign out of your active session on this device.</p>
+            <button 
+              type="button" 
+              onClick={handleLogout} 
+              className="logout-action-btn"
+            >
+              Log Out of App
+            </button>
+          </div>
         </div>
       </main>
 
       <style jsx>{`
         .layout { display: flex; min-height: 100vh; background: #f8fafc; }
-        .content { flex: 1; padding: 24px; box-sizing: border-box; max-width: 1200px; }
+        .content { 
+          flex: 1; 
+          padding: 24px; 
+          box-sizing: border-box; 
+          max-width: 1200px; 
+          padding-bottom: 90px; /* Mobile safe spacing for bottom nav */
+        }
         .top-bar { margin-bottom: 20px; }
-        .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
+        .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
         .card { background: white; padding: 24px; border-radius: 8px; border: 1px solid #e2e8f0; }
         .card h3 { margin-bottom: 4px; color: #0f172a; }
         .subtext { font-size: 13px; color: #64748b; margin-bottom: 20px; }
         .settings-form { display: flex; flex-direction: column; gap: 14px; }
-        .settings-form label { font-size: 13px; font-weight: 500; color: #334155; display: block; margin-bottom: 4px; }
+        
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: 13px; font-weight: 600; color: #334155; }
+        .required { color: #ef4444; }
+
         .settings-form input, .settings-form textarea { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
         .settings-form input:focus, .settings-form textarea:focus { outline: none; border-color: #0f172a; }
+        
         .action-btn { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; margin-top: 6px; }
         .action-btn:disabled { background: #94a3b8; cursor: not-allowed; }
+        
         .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; margin-top: 6px; }
+        
+        .logout-card { border-color: #fecaca; background: #fef2f2; }
+        .logout-card h3 { color: #b91c1c; }
+        .logout-action-btn { width: 100%; background: #ef4444; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; transition: background 0.2s; }
+        .logout-action-btn:hover { background: #dc2626; }
+
         .message-box { padding: 10px; border-radius: 6px; font-size: 13px; }
         .message-box.error { background: #fee2e2; color: #b91c1c; }
         .message-box.success { background: #dcfce7; color: #15803d; }
