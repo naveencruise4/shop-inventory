@@ -271,8 +271,8 @@ export default function ProductsPage() {
                   <span className="val">{selectedProduct.total_stock}</span>
                 </div>
                 <div className="metric">
-                  <span className="label">Reserved</span>
-                  <span className="val text-amber">{selectedProduct.reserved_stock}</span>
+                  <span className="label">Delivered</span>
+                  <span className="val text-green">{selectedProduct.delivered_stock}</span>
                 </div>
                 <div className="metric">
                   <span className="label">Available</span>
@@ -314,16 +314,16 @@ export default function ProductsPage() {
                 <div className="card">
                   <h4>Stock Breakdown & Fulfillment Logic</h4>
                   <p className="subtext" style={{ marginBottom: '16px' }}>
-                    Items stay in <strong>Reserved</strong> status while orders are Pending or Confirmed. Once an order is marked as <strong>Delivered/Completed</strong>, the reserved stock is officially finalized and deducted from total physical inventory.
+                    Items stay in <strong>Delivered</strong> status while orders are Pending or Confirmed. Once an order is marked as <strong>Delivered/Completed</strong>, the stock is officially finalized and deducted from total physical inventory.
                   </p>
                   <div className="stock-breakdown">
                     <div className="stock-box">
                       <span className="num">{selectedProduct.total_stock}</span>
                       <span className="lbl">Physical On Hand</span>
                     </div>
-                    <div className="stock-box amber">
-                      <span className="num">{selectedProduct.reserved_stock}</span>
-                      <span className="lbl">Reserved in Orders</span>
+                    <div className="stock-box green">
+                      <span className="num">{selectedProduct.delivered_stock}</span>
+                      <span className="lbl">Delivered in Orders</span>
                     </div>
                     <div className="stock-box green">
                       <span className="num">{selectedProduct.available_stock}</span>
@@ -531,7 +531,6 @@ export default function ProductsPage() {
         .metric { display: flex; flex-direction: column; }
         .metric .label { font-size: 12px; color: #64748b; }
         .metric .val { font-size: 18px; font-weight: bold; }
-        .text-amber { color: #d97706; }
         .text-green { color: #16a34a; }
 
         .tabs { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px; }
@@ -542,7 +541,6 @@ export default function ProductsPage() {
         .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
         .stock-breakdown { display: flex; gap: 16px; margin-top: 12px; }
         .stock-box { flex: 1; padding: 16px; background: #f8fafc; border-radius: 6px; text-align: center; border: 1px solid #e2e8f0; }
-        .stock-box.amber { background: #fffbeb; border-color: #fde68a; }
         .stock-box.green { background: #f0fdf4; border-color: #bbf7d0; }
         .stock-box .num { display: block; font-size: 24px; font-weight: bold; }
         .stock-box .lbl { font-size: 12px; color: #64748b; }
