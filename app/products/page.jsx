@@ -150,6 +150,7 @@ export default function ProductsPage() {
       selling_price: Number(newProd.selling_price),
       min_stock_level: Number(newProd.min_stock_level),
       stock_quantity: initQty,
+      total_stock: initQty,
       avg_cost_price: costPrice
     }]).select().single();
 
@@ -195,7 +196,8 @@ export default function ProductsPage() {
 
     const incomingQty = Number(restock.quantity);
     const incomingCost = Number(restock.purchase_price);
-    const currentQty = selectedProduct.total_stock;
+    const currentQty = selectedProduct.available_stock;//total_stock;
+    const totalStock = incomingQty + selectedProduct.total_stock;
     const currentAvgCost = selectedProduct.avg_cost_price;
 
     const newTotalQty = currentQty + incomingQty;
@@ -214,6 +216,7 @@ export default function ProductsPage() {
 
     await supabase.from('productsinfo').update({
       stock_quantity: newTotalQty,
+      total_stock: totalStock,
       avg_cost_price: newAvgCost
     }).eq('id', selectedProduct.id);
 
