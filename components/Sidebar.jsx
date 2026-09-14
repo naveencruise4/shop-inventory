@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/navigation'; // Note: use 'next/link' for Link component
+import Link from 'next/link'; // <--- MUST be next/link, NOT next/navigation
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
