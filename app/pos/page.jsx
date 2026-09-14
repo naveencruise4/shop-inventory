@@ -179,61 +179,59 @@ export default function POSPage() {
   };
 
  const [amountPaid, setAmountPaid] = useState(''); // Can be linked to an input, or left blank for full payment
-const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [saleStatus, setSaleStatus] = useState('completed'); // Default to completed/delivered
 
-const handleCheckout = async () => {
-  if (cart.length === 0) return;
-  setIsCheckingOut(true);
+  const handleCheckout = async () => {
+    if (cart.length === 0) return;
+    setIsCheckingOut(true);
 
-  try {
-    const { data: shops } = await supabase.from('shops').select('id').limit(1);
-    const currentShopId = shops?.[0]?.id;
+    try {
+      const { data: shops } = await supabase.from('shops').select('id').limit(1);
+      const currentShopId = shops?.[0]?.id;
 
-    if (!currentShopId) {
-      alert('Error: No active shop found.');
+      if (!currentShopId) {
+        alert('Error: No active shop found.');
+        setIsCheckingOut(false);
+        return;
+      }
+
+      const finalTotal = getFinalTotal();
+      const actualPaidAmount = amountPaid !== '' ? Number(amountPaid) : finalTotal;
+
+      const itemsPayload = cart.map(item => ({
+        product_id: item.id,
+        sku: item.sku,
+        quantity: item.quantity,
+        price: item.price
+      }));
+
+      // Call updated unified RPC function
+      const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
+        p_shop_id: currentShopId,
+        p_customer_id: selectedCustomer?.id || null,
+        p_total_amount: finalTotal,
+        p_amount_paid: actualPaidAmount,
+        p_payment_method: paymentMethod || 'cash',
+        p_sale_status: saleStatus || 'completed'
+      });
+
+      if (rpcError) throw rpcError;
+
+      alert(`Checkout completed successfully! Sale ID: ${saleId}`);
+      setCart([]);
+      setCustomGrandTotal('');
+      setAmountPaid('');
+      setSaleStatus('completed');
+      setSelectedCustomer(null);
+      setCustomerSearch('');
+      fetchProducts();
+    } catch (err) {
+      alert(`Checkout failed: ${err.message}`);
+    } finally {
       setIsCheckingOut(false);
-      return;
     }
-
-    const finalTotal = getFinalTotal();
-
-    // If user entered a specific partial/advance amount, use it.
-    // Otherwise, default to full payment (finalTotal).
-    const actualPaidAmount = amountPaid !== '' ? Number(amountPaid) : finalTotal;
-
-    // Format cart items payload for the Postgres function
-    const itemsPayload = cart.map(item => ({
-      product_id: item.id,
-      sku: item.sku,
-      quantity: item.quantity,
-      price: item.price
-    }));
-
-    // Call the updated complete_sale RPC transaction
-    const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
-      p_shop_id: currentShopId,
-      p_customer_id: selectedCustomer?.id || null,
-      p_total_amount: finalTotal,
-      p_amount_paid: actualPaidAmount,
-      p_payment_method: paymentMethod || 'cash',
-      p_items: itemsPayload
-    });
-
-    if (rpcError) throw rpcError;
-
-    alert(`Checkout completed successfully! Sale ID: ${saleId}`);
-    setCart([]);
-    setCustomGrandTotal('');
-    setAmountPaid('');
-    setSelectedCustomer(null);
-    setCustomerSearch('');
-    fetchProducts();
-  } catch (err) {
-    alert(`Checkout failed: ${err.message}`);
-  } finally {
-    setIsCheckingOut(false);
-  }
-};
+  };
 
   return (
     <div className="layout">
@@ -400,34 +398,65 @@ const handleCheckout = async () => {
 
               <div className="cart-summary">
                 <div className="summary-row">
-                  <span>Original Subtotal:</span>
-                  <span className="strike-text">₹{calculateOriginalSubtotal().toFixed(2)}</span>
+                    <span>Original Subtotal:</span>
+                    <span className="strike-text">₹{calculateOriginalSubtotal().toFixed(2)}</span>
                 </div>
                 
                 <div className="summary-row adjustment-row">
-                  <span>Override Total / Final Amount (₹):</span>
-                  <input 
+                    <span>Override Total / Final Amount (₹):</span>
+                    <input 
                     type="number" 
                     placeholder="Enter custom total..." 
                     value={customGrandTotal}
                     onChange={(e) => handleCustomTotalChange(e.target.value)}
                     className="custom-total-input"
-                  />
+                    />
+                </div>
+
+                {/* New Payment & Status Controls */}
+                <div className="summary-row">
+                    <span>Amount Paid (₹):</span>
+                    <input 
+                    type="number" 
+                    placeholder="Leave blank for full" 
+                    value={amountPaid}
+                    onChange={(e) => setAmountPaid(e.target.value)}
+                    className="custom-total-input"
+                    />
+                </div>
+
+                <div className="summary-row">
+                    <span>Payment Method:</span>
+                    <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="custom-total-input" style={{ width: '130px' }}>
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                    <option value="card">Card</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    </select>
+                </div>
+
+                <div className="summary-row">
+                    <span>Fulfillment Status:</span>
+                    <select value={saleStatus} onChange={(e) => setSaleStatus(e.target.value)} className="custom-total-input" style={{ width: '130px' }}>
+                    <option value="completed">Delivered / Completed</option>
+                    <option value="pending">Pending</option>
+                    <option value="processing">Processing</option>
+                    </select>
                 </div>
 
                 <div className="total-row">
-                  <span>Final Payable Amount:</span>
-                  <span className="grand-total">₹{getFinalTotal().toFixed(2)}</span>
+                    <span>Final Payable Amount:</span>
+                    <span className="grand-total">₹{getFinalTotal().toFixed(2)}</span>
                 </div>
 
                 <button 
-                  className="checkout-btn" 
-                  disabled={cart.length === 0 || isCheckingOut}
-                  onClick={handleCheckout}
+                    className="checkout-btn" 
+                    disabled={cart.length === 0 || isCheckingOut}
+                    onClick={handleCheckout}
                 >
-                  {isCheckingOut ? 'Processing...' : 'Complete Sale & Checkout'}
+                    {isCheckingOut ? 'Processing...' : 'Complete Sale & Checkout'}
                 </button>
-              </div>
+                </div>
             </div>
           </div>
         </div>
