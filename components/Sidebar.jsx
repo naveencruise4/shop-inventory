@@ -1,19 +1,53 @@
 'use client';
 
-import Link from 'next/link';
+import Link from 'next/navigation'; // Note: use 'next/link' for Link component
 import { usePathname, useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [shopName, setShopName] = useState('InventoryApp');
+
+  useEffect(() => {
+    fetchShopName();
+  }, []);
+
+  const fetchShopName = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: appUser } = await supabase
+        .from('users')
+        .select('shop_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!appUser?.shop_id) return;
+
+      const { data: shop } = await supabase
+        .from('shops')
+        .select('name')
+        .eq('id', appUser.shop_id)
+        .single();
+
+      if (shop?.name) {
+        setShopName(shop.name);
+      }
+    } catch (err) {
+      console.error('Error fetching shop name:', err);
+    }
+  };
 
   const navItems = [
     { label: '📊 Dashboard', href: '/dashboard' },
     { label: '🛒 POS', href: '/pos' },
     { label: '📦 Products', href: '/products' },
-    { label: '📒 Orders', href: '/orders' },
-    { label: '📒 Ledger & Dues', href: '/ledger' }, // Added here
+    { label: '📋 Orders', href: '/orders' },
+    { label: '📒 Ledger & Dues', href: '/ledger' },
+    { label: '⚙️ Settings', href: '/settings' },
   ];
 
   const handleLogout = async () => {
@@ -23,19 +57,21 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div className="logo">InventoryApp</div>
-      <nav>
-        {navItems.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`nav-item ${pathname === item.href ? 'active' : ''}`}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
-
+      <div>
+        <div className="logo" title={shopName}>{shopName}</div>
+        <nav>
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`nav-item ${pathname === item.href ? 'active' : ''}`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+      
       <div className="logout-section">
         <button onClick={handleLogout} className="logout-btn">
           Log Out
@@ -57,17 +93,19 @@ export default function Sidebar() {
         }
 
         .logo {
-          font-size: 18px;
+          font-size: 16px;
           font-weight: bold;
           margin-bottom: 30px;
           color: #38bdf8;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         nav {
           display: flex;
           flex-direction: column;
           gap: 8px;
-          flex: 1;
         }
 
         :global(.nav-item) {
@@ -107,7 +145,6 @@ export default function Sidebar() {
           background: #dc2626;
         }
 
-        /* Mobile View */
         @media (max-width: 768px) {
           .sidebar {
             width: 100%;
@@ -120,12 +157,12 @@ export default function Sidebar() {
 
           .logo {
             margin-bottom: 0;
+            max-width: 120px;
           }
 
           nav {
             flex-direction: row;
             gap: 5px;
-            flex: initial;
             overflow-x: auto;
           }
 
