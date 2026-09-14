@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link'; // <--- MUST be next/link, NOT next/navigation
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
@@ -42,12 +42,12 @@ export default function Sidebar() {
   };
 
   const navItems = [
-    { label: '📊 Dashboard', href: '/dashboard' },
-    { label: '🛒 POS', href: '/pos' },
-    { label: '📦 Products', href: '/products' },
-    { label: '📋 Orders', href: '/orders' },
-    { label: '📒 Ledger & Dues', href: '/ledger' },
-    { label: '⚙️ Settings', href: '/settings' },
+    { label: 'Dashboard', icon: '📊', href: '/dashboard' },
+    { label: 'POS', icon: '🛒', href: '/pos' },
+    { label: 'Products', icon: '📦', href: '/products' },
+    { label: 'Orders', icon: '📋', href: '/orders' },
+    { label: 'Ledger', icon: '📒', href: '/ledger' },
+    { label: 'Settings', icon: '⚙️', href: '/settings' },
   ];
 
   const handleLogout = async () => {
@@ -56,27 +56,30 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="sidebar">
-      <div>
-        <div className="logo" title={shopName}>{shopName}</div>
-        <nav>
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`nav-item ${pathname === item.href ? 'active' : ''}`}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-      
-      <div className="logout-section">
-        <button onClick={handleLogout} className="logout-btn">
-          Log Out
-        </button>
-      </div>
+    <>
+      <aside className="sidebar">
+        <div>
+          <div className="logo" title={shopName}>{shopName}</div>
+          <nav>
+            {navItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`nav-item ${pathname === item.href ? 'active' : ''}`}
+              >
+                <span className="nav-icon">{item.icon}</span>
+                <span className="nav-label">{item.label}</span>
+              </Link>
+            ))}
+          </nav>
+        </div>
+        
+        <div className="logout-section">
+          <button onClick={handleLogout} className="logout-btn">
+            Log Out
+          </button>
+        </div>
+      </aside>
 
       <style jsx>{`
         .sidebar {
@@ -115,6 +118,13 @@ export default function Sidebar() {
           border-radius: 6px;
           font-size: 14px;
           transition: background 0.2s, color 0.2s;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .nav-icon {
+          font-size: 16px;
         }
 
         :global(.nav-item:hover),
@@ -145,44 +155,57 @@ export default function Sidebar() {
           background: #dc2626;
         }
 
+        /* MOBILE BOTTOM NAVIGATION BAR */
         @media (max-width: 768px) {
           .sidebar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
             width: 100%;
+            height: 65px;
             min-height: auto;
             flex-direction: row;
             align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
+            justify-content: space-around;
+            padding: 0 4px;
+            z-index: 1000;
+            border-top: 1px solid #334155;
+            box-shadow: 0 -4px 10px rgba(0,0,0,0.1);
           }
 
-          .logo {
-            margin-bottom: 0;
-            max-width: 120px;
+          .logo, .logout-section {
+            display: none; /* Hidden on mobile to keep bottom bar compact */
           }
 
           nav {
             flex-direction: row;
-            gap: 5px;
-            overflow-x: auto;
+            justify-content: space-around;
+            width: 100%;
+            gap: 0;
           }
 
           :global(.nav-item) {
-            padding: 6px 10px;
-            font-size: 13px;
-            white-space: nowrap;
+            padding: 6px 4px;
+            font-size: 10px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            color: #94a3b8;
+            background: transparent !important;
           }
 
-          .logout-section {
-            padding-top: 0;
-            border-top: none;
+          .nav-icon {
+            font-size: 18px;
           }
 
-          .logout-btn {
-            padding: 6px 10px;
-            font-size: 12px;
+          :global(.nav-item.active) {
+            color: #38bdf8;
+            font-weight: 600;
           }
         }
       `}</style>
-    </aside>
+    </>
   );
 }

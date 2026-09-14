@@ -553,7 +553,18 @@ export default function ProductsPage() {
 
       <style jsx>{`
         .layout { display: flex; min-height: 100vh; background: #f8fafc; }
-        .content { flex: 1; padding: 24px; box-sizing: border-box; }
+        .content { 
+            flex: 1; 
+            padding: 24px; 
+            box-sizing: border-box; 
+            }
+
+            @media (max-width: 768px) {
+            .content {
+                padding: 16px;
+                padding-bottom: 90px; /* Leaves space so bottom bar doesn't overlap tables or buttons */
+            }
+        }
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .primary-btn, .action-btn { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
         .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
