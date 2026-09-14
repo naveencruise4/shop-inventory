@@ -48,12 +48,10 @@ export default function ProductsPage() {
     }
   }, [selectedProduct, activeTab]);
 
-const fetchProducts = async () => {
-    // 1. Get the current authenticated user
+  const fetchProducts = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 2. Get the shop_id assigned to this user
     const { data: appUser } = await supabase
       .from('users')
       .select('shop_id')
@@ -62,11 +60,10 @@ const fetchProducts = async () => {
 
     if (!appUser?.shop_id) return;
 
-    // 3. Fetch products strictly scoped to this shop
     const { data, error } = await supabase
       .from('vw_product_stock')
       .select('*')
-      .eq('shop_id', appUser.shop_id); // <--- Crucial tenant isolation filter
+      .eq('shop_id', appUser.shop_id);
 
     if (data) setProducts(data);
     if (error) console.error('Error fetching products:', error);
@@ -90,7 +87,6 @@ const fetchProducts = async () => {
     if (data) setSalesHistory(data);
   };
 
-  // --- BIDIRECTIONAL MARGIN / SELLING PRICE CALCULATOR ---
   const handleNewProdPriceChange = (field, val) => {
     const cost = Number(newProd.purchase_price || 0);
     if (field === 'selling_price') {
@@ -122,82 +118,61 @@ const fetchProducts = async () => {
     }
   };
 
-  // --- CREATE PRODUCT ---
   const handleCreateProduct = async (e) => {
-  e.preventDefault();
+    e.preventDefault();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-// Get logged-in Supabase Auth user
-const {
-  data: { user },
-  error: authError
-} = await supabase.auth.getUser();
+    if (authError || !user) {
+      alert('You are not logged in. Please log in again.');
+      return;
+    }
 
-if (authError || !user) {
-  console.error('Auth error:', authError);
-  alert('You are not logged in. Please log in again.');
-  return;
-}
+    const { data: appUser, error: userError } = await supabase
+      .from('users')
+      .select('shop_id')
+      .eq('id', user.id)
+      .single();
 
-// Get shop_id from public.users
-const { data: appUser, error: userError } = await supabase
-  .from('users')
-  .select('shop_id')
-  .eq('id', user.id)
-  .single();
+    if (userError || !appUser?.shop_id) {
+      alert('Unable to load your assigned shop.');
+      return;
+    }
 
-if (userError) {
-  console.error('Error loading user:', userError);
-  alert(`Unable to load your shop: ${userError.message}`);
-  return;
-}
+    const currentShopId = appUser.shop_id;
+    const initQty = Number(newProd.initial_quantity || 0);
+    const costPrice = Number(newProd.purchase_price || 0);
 
-if (!appUser?.shop_id) {
-  console.error('No shop assigned to user:', user.id);
-  alert('No shop is assigned to this user.');
-  return;
-}
+    const { data: prodData, error: prodErr } = await supabase.from('productsinfo').insert([{
+      shop_id: currentShopId,
+      sku: newProd.sku,
+      name: newProd.name,
+      category_name: newProd.category_name,
+      selling_price: Number(newProd.selling_price),
+      min_stock_level: Number(newProd.min_stock_level),
+      stock_quantity: initQty,
+      avg_cost_price: costPrice
+    }]).select().single();
 
-const currentShopId = appUser.shop_id;
+    if (prodErr) {
+      alert(`Error creating product: ${prodErr.message}`);
+      return;
+    }
 
-console.log('Current shop:', currentShopId);
+    if (initQty > 0 && prodData) {
+      await supabase.from('product_purchases').insert([{
+        shop_id: currentShopId,
+        product_id: prodData.id,
+        quantity: initQty,
+        purchase_price: costPrice,
+        purchase_date: newProd.purchase_date
+      }]);
+    }
 
-  const initQty = Number(newProd.initial_quantity || 0);
-  const costPrice = Number(newProd.purchase_price || 0);
+    setShowAddModal(false);
+    setNewProd({ sku: '', name: '', category_name: 'General', initial_quantity: '0', purchase_price: '', selling_price: '', margin_pct: '', purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3 });
+    fetchProducts();
+  };
 
-  // 2. Include shop_id in the payload
-  const { data: prodData, error: prodErr } = await supabase.from('productsinfo').insert([{
-    shop_id: currentShopId, // <--- Added this required field
-    sku: newProd.sku,
-    name: newProd.name,
-    category_name: newProd.category_name,
-    selling_price: Number(newProd.selling_price),
-    min_stock_level: Number(newProd.min_stock_level),
-    stock_quantity: initQty,
-    avg_cost_price: costPrice
-  }]).select().single();
-
-  if (prodErr) {
-    alert(`Error creating product: ${prodErr.message}`);
-    return;
-  }
-
-  // 3. Insert initial purchase batch if quantity > 0
-  if (initQty > 0 && prodData) {
-    await supabase.from('product_purchases').insert([{
-      shop_id: currentShopId, // <--- Also check if product_purchases requires shop_id
-      product_id: prodData.id,
-      quantity: initQty,
-      purchase_price: costPrice,
-      purchase_date: newProd.purchase_date
-    }]);
-  }
-
-  setShowAddModal(false);
-  setNewProd({ sku: '', name: '', category_name: 'General', initial_quantity: '0', purchase_price: '', selling_price: '', margin_pct: '', purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3 });
-  fetchProducts();
-};
-
-  // --- EDIT PRODUCT PRICE/MARGIN ---
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
     if (!selectedProduct) return;
@@ -214,7 +189,6 @@ console.log('Current shop:', currentShopId);
     }
   };
 
-  // --- RESTOCK INVENTORY ---
   const handleRestock = async (e) => {
     e.preventDefault();
     if (!selectedProduct) return;
@@ -230,6 +204,7 @@ console.log('Current shop:', currentShopId);
       : incomingCost;
 
     await supabase.from('product_purchases').insert([{
+      shop_id: selectedProduct.shop_id,
       product_id: selectedProduct.id,
       quantity: incomingQty,
       purchase_price: incomingCost,
@@ -261,7 +236,6 @@ console.log('Current shop:', currentShopId);
       <Sidebar />
       <main className="content">
         {selectedProduct ? (
-          /* ================= PRODUCT DETAILS VIEW ================= */
           <div className="details-wrapper">
             <button className="back-btn" onClick={() => setSelectedProduct(null)}>← Back to Products</button>
             
@@ -307,7 +281,6 @@ console.log('Current shop:', currentShopId);
               </div>
             </div>
 
-            {/* TAB NAVIGATION */}
             <div className="tabs">
               {['overview', 'stock', 'purchases', 'sales'].map(tab => (
                 <button key={tab} className={`tab ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
@@ -316,7 +289,6 @@ console.log('Current shop:', currentShopId);
               ))}
             </div>
 
-            {/* TAB CONTENT */}
             <div className="tab-content">
               {activeTab === 'overview' && (
                 <div className="info-grid">
@@ -340,7 +312,10 @@ console.log('Current shop:', currentShopId);
 
               {activeTab === 'stock' && (
                 <div className="card">
-                  <h4>Stock Breakdown</h4>
+                  <h4>Stock Breakdown & Fulfillment Logic</h4>
+                  <p className="subtext" style={{ marginBottom: '16px' }}>
+                    Items stay in <strong>Reserved</strong> status while orders are Pending or Confirmed. Once an order is marked as <strong>Delivered/Completed</strong>, the reserved stock is officially finalized and deducted from total physical inventory.
+                  </p>
                   <div className="stock-breakdown">
                     <div className="stock-box">
                       <span className="num">{selectedProduct.total_stock}</span>
@@ -348,7 +323,7 @@ console.log('Current shop:', currentShopId);
                     </div>
                     <div className="stock-box amber">
                       <span className="num">{selectedProduct.reserved_stock}</span>
-                      <span className="lbl">Reserved in Pending Orders</span>
+                      <span className="lbl">Reserved in Orders</span>
                     </div>
                     <div className="stock-box green">
                       <span className="num">{selectedProduct.available_stock}</span>
@@ -403,7 +378,6 @@ console.log('Current shop:', currentShopId);
             </div>
           </div>
         ) : (
-          /* ================= MASTER PRODUCTS LIST VIEW ================= */
           <>
             <div className="top-bar">
               <h1>Products</h1>
@@ -452,7 +426,6 @@ console.log('Current shop:', currentShopId);
           </>
         )}
 
-        {/* ================= MODAL: ADD PRODUCT DEFINITION ================= */}
         {showAddModal && (
           <div className="modal-overlay">
             <div className="modal">
@@ -484,7 +457,6 @@ console.log('Current shop:', currentShopId);
           </div>
         )}
 
-        {/* ================= MODAL: EDIT SELLING PRICE / MARGIN ================= */}
         {showEditModal && (
           <div className="modal-overlay">
             <div className="modal">
@@ -510,7 +482,6 @@ console.log('Current shop:', currentShopId);
           </div>
         )}
 
-        {/* ================= MODAL: RESTOCK INVENTORY ================= */}
         {showRestockModal && (
           <div className="modal-overlay">
             <div className="modal">
