@@ -196,7 +196,7 @@ export default function ProductsPage() {
 
     const incomingQty = Number(restock.quantity);
     const incomingCost = Number(restock.purchase_price);
-    const currentQty = selectedProduct.available_stock;//total_stock;
+    const currentQty = selectedProduct.available_stock;
     const totalStock = incomingQty + selectedProduct.total_stock;
     const currentAvgCost = selectedProduct.avg_cost_price;
 
@@ -434,22 +434,53 @@ export default function ProductsPage() {
             <div className="modal">
               <h3>Add New Product Catalog Entry</h3>
               <form onSubmit={handleCreateProduct}>
-                <input placeholder="SKU (e.g. SOF-001)" value={newProd.sku} onChange={(e) => setNewProd({ ...newProd, sku: e.target.value })} required />
-                <input placeholder="Product Name" value={newProd.name} onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} required />
-                <input placeholder="Category" value={newProd.category_name} onChange={(e) => setNewProd({ ...newProd, category_name: e.target.value })} required />
+                <div className="form-group">
+                  <label>SKU Code <span className="required">*</span></label>
+                  <input placeholder="e.g. SOF-001" value={newProd.sku} onChange={(e) => setNewProd({ ...newProd, sku: e.target.value })} required />
+                </div>
+
+                <div className="form-group">
+                  <label>Product Name <span className="required">*</span></label>
+                  <input placeholder="e.g. Basmati Rice 5kg" value={newProd.name} onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} required />
+                </div>
+
+                <div className="form-group">
+                  <label>Category <span className="required">*</span></label>
+                  <input placeholder="e.g. Groceries" value={newProd.category_name} onChange={(e) => setNewProd({ ...newProd, category_name: e.target.value })} required />
+                </div>
                 
                 <div className="form-row">
-                  <input type="number" placeholder="Initial Qty" value={newProd.initial_quantity} onChange={(e) => setNewProd({ ...newProd, initial_quantity: e.target.value })} required />
-                  <input type="number" step="0.01" placeholder="Purchase Price (₹)" value={newProd.purchase_price} onChange={(e) => handleNewProdPriceChange('purchase_price', e.target.value)} required />
+                  <div className="form-group">
+                    <label>Initial Qty <span className="required">*</span></label>
+                    <input type="number" placeholder="0" value={newProd.initial_quantity} onChange={(e) => setNewProd({ ...newProd, initial_quantity: e.target.value })} required />
+                  </div>
+                  <div className="form-group">
+                    <label>Purchase Price (₹) <span className="required">*</span></label>
+                    <input type="number" step="0.01" placeholder="0.00" value={newProd.purchase_price} onChange={(e) => handleNewProdPriceChange('purchase_price', e.target.value)} required />
+                  </div>
                 </div>
 
                 <div className="form-row">
-                  <input type="number" step="0.01" placeholder="Selling Price (₹)" value={newProd.selling_price} onChange={(e) => handleNewProdPriceChange('selling_price', e.target.value)} required />
-                  <input type="number" step="0.1" placeholder="Margin %" value={newProd.margin_pct} onChange={(e) => handleNewProdPriceChange('margin_pct', e.target.value)} required />
+                  <div className="form-group">
+                    <label>Selling Price (₹) <span className="required">*</span></label>
+                    <input type="number" step="0.01" placeholder="0.00" value={newProd.selling_price} onChange={(e) => handleNewProdPriceChange('selling_price', e.target.value)} required />
+                  </div>
+                  <div className="form-group">
+                    <label>Margin % <span className="required">*</span></label>
+                    <input type="number" step="0.1" placeholder="0.0" value={newProd.margin_pct} onChange={(e) => handleNewProdPriceChange('margin_pct', e.target.value)} required />
+                  </div>
                 </div>
 
-                <input type="date" value={newProd.purchase_date} onChange={(e) => setNewProd({ ...newProd, purchase_date: e.target.value })} required />
-                <input type="number" placeholder="Min Stock Alert Level" value={newProd.min_stock_level} onChange={(e) => setNewProd({ ...newProd, min_stock_level: e.target.value })} required />
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Purchase Date <span className="required">*</span></label>
+                    <input type="date" value={newProd.purchase_date} onChange={(e) => setNewProd({ ...newProd, purchase_date: e.target.value })} required />
+                  </div>
+                  <div className="form-group">
+                    <label>Min Stock Alert Level <span className="required">*</span></label>
+                    <input type="number" placeholder="3" value={newProd.min_stock_level} onChange={(e) => setNewProd({ ...newProd, min_stock_level: e.target.value })} required />
+                  </div>
+                </div>
                 
                 <div className="modal-actions">
                   <button type="submit" className="action-btn">Save Product</button>
@@ -464,15 +495,15 @@ export default function ProductsPage() {
           <div className="modal-overlay">
             <div className="modal">
               <h3>Edit Price: {selectedProduct.name}</h3>
-              <p className="subtext">Cost Price: ₹{selectedProduct.avg_cost_price}</p>
+              <p className="subtext" style={{ marginBottom: '10px' }}>Current Base Cost Price: ₹{selectedProduct.avg_cost_price}</p>
               <form onSubmit={handleUpdateProduct}>
                 <div className="form-row">
-                  <div>
-                    <label>Selling Price (₹)</label>
+                  <div className="form-group">
+                    <label>Selling Price (₹) <span className="required">*</span></label>
                     <input type="number" step="0.01" value={editProd.selling_price} onChange={(e) => handleEditPriceChange('selling_price', e.target.value)} required />
                   </div>
-                  <div>
-                    <label>Margin %</label>
+                  <div className="form-group">
+                    <label>Margin % <span className="required">*</span></label>
                     <input type="number" step="0.1" value={editProd.margin_pct} onChange={(e) => handleEditPriceChange('margin_pct', e.target.value)} required />
                   </div>
                 </div>
@@ -490,10 +521,26 @@ export default function ProductsPage() {
             <div className="modal">
               <h3>Restock Batch: {selectedProduct.name}</h3>
               <form onSubmit={handleRestock}>
-                <input type="number" placeholder="Quantity Received" value={restock.quantity} onChange={(e) => setRestock({ ...restock, quantity: e.target.value })} required />
-                <input type="number" step="0.01" placeholder="Purchase Cost Per Unit (₹)" value={restock.purchase_price} onChange={(e) => setRestock({ ...restock, purchase_price: e.target.value })} required />
-                <input placeholder="Supplier Name (Optional)" value={restock.supplier_name} onChange={(e) => setRestock({ ...restock, supplier_name: e.target.value })} />
-                <input type="date" value={restock.purchase_date} onChange={(e) => setRestock({ ...restock, purchase_date: e.target.value })} required />
+                <div className="form-group">
+                  <label>Quantity Received <span className="required">*</span></label>
+                  <input type="number" placeholder="Enter qty" value={restock.quantity} onChange={(e) => setRestock({ ...restock, quantity: e.target.value })} required />
+                </div>
+
+                <div className="form-group">
+                  <label>Purchase Cost Per Unit (₹) <span className="required">*</span></label>
+                  <input type="number" step="0.01" placeholder="Enter unit cost" value={restock.purchase_price} onChange={(e) => setRestock({ ...restock, purchase_price: e.target.value })} required />
+                </div>
+
+                <div className="form-group">
+                  <label>Supplier Name</label>
+                  <input placeholder="Optional supplier name" value={restock.supplier_name} onChange={(e) => setRestock({ ...restock, supplier_name: e.target.value })} />
+                </div>
+
+                <div className="form-group">
+                  <label>Purchase Date <span className="required">*</span></label>
+                  <input type="date" value={restock.purchase_date} onChange={(e) => setRestock({ ...restock, purchase_date: e.target.value })} required />
+                </div>
+
                 <div className="modal-actions">
                   <button type="submit" className="action-btn">Confirm Restock</button>
                   <button type="button" className="cancel-btn" onClick={() => setShowRestockModal(false)}>Cancel</button>
@@ -548,13 +595,19 @@ export default function ProductsPage() {
         .stock-box .num { display: block; font-size: 24px; font-weight: bold; }
         .stock-box .lbl { font-size: 12px; color: #64748b; }
 
-        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; }
-        .modal { background: white; padding: 24px; border-radius: 8px; width: 440px; display: flex; flex-direction: column; gap: 12px; }
-        .modal input, .modal label { width: 100%; display: block; font-size: 13px; color: #475569; }
-        .modal input { padding: 10px; margin-top: 4px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
-        .form-row { display: flex; gap: 10px; }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        .modal { background: white; padding: 24px; border-radius: 8px; width: 480px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        
+        .form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; margin-bottom: 10px; }
+        .form-group label { font-size: 13px; font-weight: 600; color: #334155; }
+        .required { color: #ef4444; }
+
+        .modal input { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; width: 100%; }
+        .modal input:focus { outline: none; border-color: #0f172a; }
+        
+        .form-row { display: flex; gap: 12px; }
         .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
-        .cancel-btn { flex: 1; padding: 10px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; }
+        .cancel-btn { flex: 1; padding: 10px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
       `}</style>
     </div>
   );
