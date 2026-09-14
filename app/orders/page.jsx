@@ -11,7 +11,7 @@ export default function SalesOrdersPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [activePaymentModal, setActivePaymentModal] = useState(null);
-  const [paymentInput, setPaymentInput] = useState({ amount: '', method: 'Cash' });
+  const [paymentInput, setPaymentInput] = useState({ amount: '', method: 'cash' });
 
   useEffect(() => {
     fetchSales();
@@ -35,33 +35,44 @@ export default function SalesOrdersPage() {
     if (!activePaymentModal) return;
 
     const addAmt = Number(paymentInput.amount);
-    const newTotalPaid = Number(activePaymentModal.advance_paid || 0) + addAmt;
+    // Standardized strictly to paid_amount
+    const currentPaid = Number(activePaymentModal.paid_amount || 0);
+    const newTotalPaid = currentPaid + addAmt;
     const totalAmount = Number(activePaymentModal.total_amount);
 
-    let newPayStatus = 'Partially Paid';
+    let newPayStatus = 'partial';
     if (newTotalPaid >= totalAmount) {
-      newPayStatus = 'Paid';
+      newPayStatus = 'paid';
     }
 
     const { data: userData } = await supabase.from('users').select('shop_id').single();
 
-    // 1. Log Payment
-    await supabase.from('sale_payments').insert([{
-      shop_id: userData?.shop_id,
+    // 1. Log Payment into sale_payments table
+    const { error: paymentError } = await supabase.from('sale_payments').insert([{
+      shop_id: activePaymentModal.shop_id || userData?.shop_id,
       sale_id: activePaymentModal.id,
       amount: addAmt,
       payment_method: paymentInput.method
     }]);
 
-    // 2. Update Sale
-    await supabase.from('sales').update({
-      advance_paid: newTotalPaid,
-      payment_status: newPayStatus,
-      payment_method: paymentInput.method
+    if (paymentError) {
+      alert(`Error recording payment: ${paymentError.message}`);
+      return;
+    }
+
+    // 2. Update Sale Record with new paid_amount and status
+    const { error: saleError } = await supabase.from('sales').update({
+      paid_amount: newTotalPaid,
+      payment_status: newPayStatus
     }).eq('id', activePaymentModal.id);
 
+    if (saleError) {
+      alert(`Error updating sale record: ${saleError.message}`);
+      return;
+    }
+
     setActivePaymentModal(null);
-    setPaymentInput({ amount: '', method: 'Cash' });
+    setPaymentInput({ amount: '', method: 'cash' });
     fetchSales();
   };
 
@@ -71,7 +82,7 @@ export default function SalesOrdersPage() {
       s.customers?.name?.toLowerCase().includes(search.toLowerCase()) ||
       s.sale_items?.some(item => item.sku?.toLowerCase().includes(search.toLowerCase()));
     
-    const matchesStatus = statusFilter === 'All' || (s.sale_status || 'Pending') === statusFilter;
+    const matchesStatus = statusFilter === 'All' || (s.sale_status || 'pending').toLowerCase() === statusFilter.toLowerCase();
     return matchesSearch && matchesStatus;
   });
 
@@ -82,11 +93,20 @@ export default function SalesOrdersPage() {
         <h1>Sales & Fulfillments</h1>
 
         <div className="filter-bar">
-          <input placeholder="Search by Order ID, Customer, or SKU..." value={search} onChange={(e) => setSearch(e.target.value)} className="search-input" />
+          <input 
+            placeholder="Search by Order ID, Customer, or SKU..." 
+            value={search} 
+            onChange={(e) => setSearch(e.target.value)} 
+            className="search-input" 
+          />
           <div className="status-buttons">
-            {['All', 'Pending', 'Confirmed', 'Delivered', 'Cancelled'].map(st => (
-              <button key={st} className={`filter-btn ${statusFilter === st ? 'active' : ''}`} onClick={() => setStatusFilter(st)}>
-                {st}
+            {['All', 'completed', 'pending', 'confirmed', 'cancelled'].map(st => (
+              <button 
+                key={st} 
+                className={`filter-btn ${statusFilter.toLowerCase() === st.toLowerCase() ? 'active' : ''}`} 
+                onClick={() => setStatusFilter(st)}
+              >
+                {st.charAt(0).toUpperCase() + st.slice(1)}
               </button>
             ))}
           </div>
@@ -105,44 +125,62 @@ export default function SalesOrdersPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredSales.map(s => (
-                <tr key={s.id}>
-                  <td>
-                    <strong>#{s.id.slice(0, 8)}</strong>
-                    <div className="subtext">{new Date(s.created_at).toLocaleDateString()}</div>
-                  </td>
-                  <td>
-                    <div><strong>{s.customers?.name || 'Walk-in Customer'}</strong></div>
-                    {s.sale_items?.map(i => (
-                      <div key={i.id} className="subtext">• SKU: {i.sku || 'N/A'} (x{i.quantity})</div>
-                    ))}
-                  </td>
-                  <td>
-                    <div><strong>₹{s.total_amount}</strong></div>
-                    <div className="subtext" style={{ color: '#16a34a' }}>Paid: ₹{s.advance_paid || 0}</div>
-                  </td>
-                  <td>
-                    <span className={`tag ${s.payment_status?.toLowerCase().replace(' ', '-')}`}>
-                      {s.payment_status || 'Partially Paid'}
-                    </span>
-                  </td>
-                  <td>
-                    <select value={s.sale_status || 'Pending'} onChange={(e) => handleStatusChange(s.id, e.target.value)} className="status-select">
-                      <option value="Pending">Pending</option>
-                      <option value="Confirmed">Confirmed</option>
-                      <option value="Delivered">Delivered</option>
-                      <option value="Cancelled">Cancelled</option>
-                    </select>
-                  </td>
-                  <td>
-                    {s.payment_status !== 'Paid' && (
-                      <button className="pay-btn" onClick={() => { setActivePaymentModal(s); setPaymentInput({ amount: (s.total_amount - (s.advance_paid || 0)).toFixed(2), method: 'Cash' }); }}>
-                        + Add Payment
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {filteredSales.map(s => {
+                const paidAmount = Number(s.paid_amount || 0);
+                const paymentStatusStr = (s.payment_status || 'pending').toLowerCase();
+
+                return (
+                  <tr key={s.id}>
+                    <td>
+                      <strong>#{s.id.slice(0, 8)}</strong>
+                      <div className="subtext">{new Date(s.created_at).toLocaleDateString()}</div>
+                    </td>
+                    <td>
+                      <div><strong>{s.customers?.name || 'Walk-in Customer'}</strong></div>
+                      {s.sale_items?.map(i => (
+                        <div key={i.id} className="subtext">• SKU: {i.sku || 'N/A'} (x{i.quantity})</div>
+                      ))}
+                    </td>
+                    <td>
+                      <div><strong>₹{s.total_amount}</strong></div>
+                      <div className="subtext" style={{ color: '#16a34a' }}>Paid: ₹{paidAmount}</div>
+                    </td>
+                    <td>
+                      <span className={`tag ${paymentStatusStr}`}>
+                        {s.payment_status || 'Pending'}
+                      </span>
+                    </td>
+                    <td>
+                      <select 
+                        value={s.sale_status || 'completed'} 
+                        onChange={(e) => handleStatusChange(s.id, e.target.value)} 
+                        className="status-select"
+                      >
+                        <option value="completed">Delivered / Completed</option>
+                        <option value="pending">Pending</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </td>
+                    <td>
+                      {paymentStatusStr !== 'paid' && (
+                        <button 
+                          className="pay-btn" 
+                          onClick={() => { 
+                            setActivePaymentModal(s); 
+                            setPaymentInput({ 
+                              amount: (Number(s.total_amount) - paidAmount).toFixed(2), 
+                              method: 'cash' 
+                            }); 
+                          }}
+                        >
+                          + Add Payment
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -151,14 +189,24 @@ export default function SalesOrdersPage() {
           <div className="modal-overlay">
             <div className="modal">
               <h3>Record Payment for Sale #{activePaymentModal.id.slice(0, 8)}</h3>
-              <p>Total: ₹{activePaymentModal.total_amount} | Already Paid: ₹{activePaymentModal.advance_paid || 0}</p>
+              <p>Total: ₹{activePaymentModal.total_amount} | Already Paid: ₹{activePaymentModal.paid_amount || 0}</p>
               <form onSubmit={handleAddPayment}>
-                <input type="number" step="0.01" placeholder="Amount Received" value={paymentInput.amount} onChange={(e) => setPaymentInput({ ...paymentInput, amount: e.target.value })} required />
-                <select value={paymentInput.method} onChange={(e) => setPaymentInput({ ...paymentInput, method: e.target.value })}>
-                  <option value="Cash">Cash</option>
-                  <option value="UPI">UPI</option>
-                  <option value="Card">Card</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
+                <input 
+                  type="number" 
+                  step="0.01" 
+                  placeholder="Amount Received" 
+                  value={paymentInput.amount} 
+                  onChange={(e) => setPaymentInput({ ...paymentInput, amount: e.target.value })} 
+                  required 
+                />
+                <select 
+                  value={paymentInput.method} 
+                  onChange={(e) => setPaymentInput({ ...paymentInput, method: e.target.value })}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                  <option value="card">Card</option>
+                  <option value="bank_transfer">Bank Transfer</option>
                 </select>
                 <div className="modal-actions">
                   <button type="submit" className="submit-btn">Save Payment</button>
@@ -171,7 +219,7 @@ export default function SalesOrdersPage() {
       </main>
 
       <style jsx>{`
-        .layout { display: flex; min-height: 100vh; }
+        .layout { display: flex; min-height: 100vh; background: #f8fafc; }
         .content { flex: 1; padding: 24px; box-sizing: border-box; }
         .filter-bar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; justify-content: space-between; }
         .search-input { flex: 1; min-width: 240px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
@@ -185,15 +233,15 @@ export default function SalesOrdersPage() {
         .subtext { font-size: 12px; color: #64748b; }
         .status-select { padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1; }
         .pay-btn { background: #16a34a; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-        .tag { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; }
+        .tag { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: capitalize; }
         .tag.paid { background: #dcfce7; color: #15803d; }
-        .tag.partially-paid { background: #fef9c3; color: #a16207; }
-        .tag.unpaid { background: #fee2e2; color: #b91c1c; }
-        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; }
+        .tag.partial { background: #fef9c3; color: #a16207; }
+        .tag.pending { background: #fee2e2; color: #b91c1c; }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
         .modal { background: white; padding: 24px; border-radius: 8px; width: 360px; display: flex; flex-direction: column; gap: 12px; }
-        .modal input, .modal select { width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box; }
+        .modal input, .modal select { width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; }
         .modal-actions { display: flex; gap: 10px; }
-        :global(.submit-btn) { flex: 1; padding: 10px; background: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .submit-btn { flex: 1; padding: 10px; background: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; }
         .cancel-btn { flex: 1; padding: 10px; background: #64748b; color: white; border: none; border-radius: 4px; cursor: pointer; }
       `}</style>
     </div>
