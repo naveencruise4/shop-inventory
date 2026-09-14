@@ -206,11 +206,12 @@ export default function POSPage() {
         price: item.price
       }));
 
-      // Call updated unified RPC function
+      // Call updated unified RPC function with p_items included
       const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
         p_shop_id: currentShopId,
         p_customer_id: selectedCustomer?.id || null,
         p_total_amount: finalTotal,
+        p_items: itemsPayload,        // <--- ADDED THIS ARGUMENT
         p_amount_paid: actualPaidAmount,
         p_payment_method: paymentMethod || 'cash',
         p_sale_status: saleStatus || 'completed'
