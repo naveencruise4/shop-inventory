@@ -9,61 +9,7 @@ export default function SignupPage() {
   const [form, setForm] = useState({ email: '', password: '', shopName: '', ownerName: '' });
   const [loading, setLoading] = useState(false);
 
-const handleSignup = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      // 1. Sign up the user via Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: {
-          data: {
-            shop_name: form.shopName,
-            full_name: form.ownerName,
-          },
-        },
-      });
-
-      if (authError) throw authError;
-
-      const user = authData?.user;
-      if (!user) throw new Error('User creation failed.');
-
-      // 2. Explicitly create the shop record
-      const { data: shopData, error: shopError } = await supabase
-        .from('shops')
-        .insert([{ name: form.shopName }])
-        .select()
-        .single();
-
-      if (shopError) throw shopError;
-
-      // 3. Explicitly create the user profile linked to the shop
-      const { error: profileError } = await supabase
-        .from('users')
-        .insert([{
-          id: user.id,
-          email: form.email,
-          full_name: form.ownerName,
-          shop_id: shopData.id,
-          role: 'OWNER'
-        }]);
-
-      if (profileError) throw profileError;
-
-      alert('Registration successful!');
-      router.push('/dashboard');
-    } catch (err) {
-      alert(`Signup failed: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-//old code
-  /*const handleSignup = async (e) => {
+  const handleSignup = async (e) => {
     e.preventDefault();
     setLoading(true);
 
@@ -88,7 +34,7 @@ const handleSignup = async (e) => {
     } finally {
       setLoading(false);
     }
-  };*/
+  };
 
   return (
     <div style={{ maxWidth: '400px', margin: '80px auto', padding: '20px', background: '#fff', borderRadius: '8px' }}>
