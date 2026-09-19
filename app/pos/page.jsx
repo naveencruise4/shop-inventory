@@ -19,7 +19,7 @@ export default function POSPage() {
 
   // POS Cart State
   const [cart, setCart] = useState([]);
-  const [customGrandTotal, setCustomGrandTotal] = useState(''); // Order-level total override
+  const [customGrandTotal, setCustomGrandTotal] = useState('');
   
   // Search & Dropdown State
   const [searchTerm, setSearchTerm] = useState('');
@@ -28,6 +28,9 @@ export default function POSPage() {
   const customerDropdownRef = useRef(null);
   
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [amountPaid, setAmountPaid] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [saleStatus, setSaleStatus] = useState('completed');
 
   useEffect(() => {
     fetchProducts();
@@ -86,7 +89,9 @@ export default function POSPage() {
         ...product,
         quantity: 1,
         originalPrice: product.selling_price,
-        price: product.selling_price // Negotiable price
+        price: product.selling_price,
+        has_gst: product.has_gst || false,
+        gst_percentage: product.gst_percentage || 0
       }]);
     }
     setSearchTerm('');
@@ -107,11 +112,10 @@ export default function POSPage() {
     }).filter(Boolean));
   };
 
-  // Handle individual item price change (Bargaining)
   const handleItemPriceChange = (id, newPriceVal) => {
     const newPrice = Number(newPriceVal);
     setCart(cart.map(item => item.id === id ? { ...item, price: isNaN(newPrice) ? 0 : newPrice } : item));
-    setCustomGrandTotal(''); // Reset custom total when individual items change manually
+    setCustomGrandTotal('');
   };
 
   const removeFromCart = (id) => {
@@ -119,7 +123,6 @@ export default function POSPage() {
     setCustomGrandTotal('');
   };
 
-  // Calculate standard subtotal sum
   const calculateOriginalSubtotal = () => {
     return cart.reduce((sum, item) => sum + (Number(item.originalPrice) * Number(item.quantity)), 0);
   };
@@ -128,7 +131,26 @@ export default function POSPage() {
     return cart.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
   };
 
-  // Handle Order-Level Total Adjustment (Auto-adjusts item prices proportionally)
+  // Tax summaries derived dynamically from inclusive prices
+  const calculateTotalGSTBreakdown = () => {
+    let totalBase = 0;
+    let totalGst = 0;
+
+    cart.forEach(item => {
+      const itemInclusiveTotal = item.price * item.quantity;
+      if (item.has_gst && item.gst_percentage > 0) {
+        const base = itemInclusiveTotal / (1 + item.gst_percentage / 100);
+        const gst = itemInclusiveTotal - base;
+        totalBase += base;
+        totalGst += gst;
+      } else {
+        totalBase += itemInclusiveTotal;
+      }
+    });
+
+    return { totalBase, totalGst };
+  };
+
   const handleCustomTotalChange = (val) => {
     setCustomGrandTotal(val);
     const newTotal = Number(val);
@@ -136,7 +158,6 @@ export default function POSPage() {
 
     if (!isNaN(newTotal) && newTotal > 0 && currentSub > 0) {
       const ratio = newTotal / currentSub;
-      // Proportional distribution across items
       setCart(cart.map(item => ({
         ...item,
         price: Number((item.price * ratio).toFixed(2))
@@ -178,10 +199,6 @@ export default function POSPage() {
     setNewCust({ name: '', phone: '', email: '' });
   };
 
- const [amountPaid, setAmountPaid] = useState(''); // Can be linked to an input, or left blank for full payment
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [saleStatus, setSaleStatus] = useState('completed'); // Default to completed/delivered
-
   const handleCheckout = async () => {
     if (cart.length === 0) return;
     setIsCheckingOut(true);
@@ -199,19 +216,33 @@ export default function POSPage() {
       const finalTotal = getFinalTotal();
       const actualPaidAmount = amountPaid !== '' ? Number(amountPaid) : finalTotal;
 
-      const itemsPayload = cart.map(item => ({
-        product_id: item.id,
-        sku: item.sku,
-        quantity: item.quantity,
-        price: item.price
-      }));
+      const itemsPayload = cart.map(item => {
+        const basePrice = item.has_gst && item.gst_percentage > 0 
+          ? Number((item.price / (1 + item.gst_percentage / 100)).toFixed(2))
+          : item.price;
+        
+        const gstVal = item.has_gst && item.gst_percentage > 0
+          ? Number((item.price - basePrice).toFixed(2))
+          : 0;
 
-      // Call updated unified RPC function with p_items included
+        return {
+          product_id: item.id,
+          sku: item.sku,
+          quantity: item.quantity,
+          price: item.price,
+          unit_price: item.price,
+          has_gst: item.has_gst,
+          gst_percentage: item.gst_percentage,
+          base_price: basePrice,
+          gst_amount: gstVal * item.quantity
+        };
+      });
+
       const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
         p_shop_id: currentShopId,
         p_customer_id: selectedCustomer?.id || null,
         p_total_amount: finalTotal,
-        p_items: itemsPayload,        // <--- ADDED THIS ARGUMENT
+        p_items: itemsPayload,
         p_amount_paid: actualPaidAmount,
         p_payment_method: paymentMethod || 'cash',
         p_sale_status: saleStatus || 'completed'
@@ -233,6 +264,8 @@ export default function POSPage() {
       setIsCheckingOut(false);
     }
   };
+
+  const { totalBase, totalGst } = calculateTotalGSTBreakdown();
 
   return (
     <div className="layout">
@@ -265,6 +298,7 @@ export default function POSPage() {
                         <div key={p.id} className="dropdown-item" onClick={() => addToCart(p)}>
                           <div>
                             <strong>{p.name}</strong> <span className="subtext">({p.sku})</span>
+                            {p.has_gst && <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', marginLeft: '6px', padding: '2px 4px', borderRadius: '4px' }}>GST {p.gst_percentage}%</span>}
                           </div>
                           <div className="dropdown-right">
                             <span className="price">₹{p.selling_price}</span>
@@ -354,7 +388,7 @@ export default function POSPage() {
                       <tr>
                         <th>Item</th>
                         <th>Qty</th>
-                        <th>Bargained Price (₹)</th>
+                        <th>Price (₹)</th>
                         <th>Subtotal</th>
                         <th></th>
                       </tr>
@@ -365,6 +399,11 @@ export default function POSPage() {
                           <td>
                             <strong>{item.name}</strong><br/>
                             <span className="subtext">{item.sku}</span>
+                            {item.has_gst && item.gst_percentage > 0 && (
+                              <span style={{ display: 'block', fontSize: '10px', color: '#0369a1' }}>
+                                Incl. GST {item.gst_percentage}% (Base: ₹{(item.price / (1 + item.gst_percentage / 100)).toFixed(2)})
+                              </span>
+                            )}
                           </td>
                           <td>
                             <div className="qty-controls">
@@ -402,46 +441,52 @@ export default function POSPage() {
                     <span>Original Subtotal:</span>
                     <span className="strike-text">₹{calculateOriginalSubtotal().toFixed(2)}</span>
                 </div>
+
+                {cart.length > 0 && (
+                  <div className="summary-row" style={{ fontSize: '12px', background: '#f1f5f9', padding: '6px 8px', borderRadius: '4px' }}>
+                    <span>Tax Breakdown:</span>
+                    <span>Base: ₹{totalBase.toFixed(2)} | GST: ₹{totalGst.toFixed(2)}</span>
+                  </div>
+                )}
                 
                 <div className="summary-row adjustment-row">
-                    <span>Override Total / Final Amount (₹):</span>
+                    <span>Override Total (₹):</span>
                     <input 
-                    type="number" 
-                    placeholder="Enter custom total..." 
-                    value={customGrandTotal}
-                    onChange={(e) => handleCustomTotalChange(e.target.value)}
-                    className="custom-total-input"
+                      type="number" 
+                      placeholder="Enter custom total..." 
+                      value={customGrandTotal}
+                      onChange={(e) => handleCustomTotalChange(e.target.value)}
+                      className="custom-total-input"
                     />
                 </div>
 
-                {/* New Payment & Status Controls */}
                 <div className="summary-row">
                     <span>Amount Paid (₹):</span>
                     <input 
-                    type="number" 
-                    placeholder="Leave blank for full" 
-                    value={amountPaid}
-                    onChange={(e) => setAmountPaid(e.target.value)}
-                    className="custom-total-input"
+                      type="number" 
+                      placeholder="Leave blank for full" 
+                      value={amountPaid}
+                      onChange={(e) => setAmountPaid(e.target.value)}
+                      className="custom-total-input"
                     />
                 </div>
 
                 <div className="summary-row">
                     <span>Payment Method:</span>
                     <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="custom-total-input" style={{ width: '130px' }}>
-                    <option value="cash">Cash</option>
-                    <option value="upi">UPI</option>
-                    <option value="card">Card</option>
-                    <option value="bank_transfer">Bank Transfer</option>
+                      <option value="cash">Cash</option>
+                      <option value="upi">UPI</option>
+                      <option value="card">Card</option>
+                      <option value="bank_transfer">Bank Transfer</option>
                     </select>
                 </div>
 
                 <div className="summary-row">
                     <span>Fulfillment Status:</span>
                     <select value={saleStatus} onChange={(e) => setSaleStatus(e.target.value)} className="custom-total-input" style={{ width: '130px' }}>
-                    <option value="completed">Delivered / Completed</option>
-                    <option value="pending">Pending</option>
-                    <option value="processing">Processing</option>
+                      <option value="completed">Delivered / Completed</option>
+                      <option value="pending">Pending</option>
+                      <option value="processing">Processing</option>
                     </select>
                 </div>
 
@@ -457,7 +502,7 @@ export default function POSPage() {
                 >
                     {isCheckingOut ? 'Processing...' : 'Complete Sale & Checkout'}
                 </button>
-                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -490,10 +535,8 @@ export default function POSPage() {
         .layout { display: flex; min-height: 100vh; background: #f8fafc; }
         .content { flex: 1; padding: 24px; box-sizing: border-box; }
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        
         .pos-container { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
         .card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; height: fit-content; }
-        
         .search-dropdown-container { position: relative; margin-bottom: 20px; }
         .search-input { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
         .dropdown-list { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 6px; max-height: 250px; overflow-y: auto; z-index: 50; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-top: 2px; }
@@ -505,46 +548,38 @@ export default function POSPage() {
         .stock-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
         .stock-badge.green { background: #dcfce7; color: #15803d; }
         .stock-badge.red { background: #fee2e2; color: #b91c1c; }
-
         .quick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 10px; }
         .quick-tile { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; text-align: left; cursor: pointer; transition: 0.15s; display: flex; flex-direction: column; gap: 4px; }
         .quick-tile:hover { background: #f1f5f9; border-color: #cbd5e1; }
         .tile-name { font-weight: 600; font-size: 13px; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .tile-price { font-weight: bold; color: #0284c7; font-size: 13px; }
         .tile-stock { font-size: 11px; color: #64748b; }
-
         .cart-card { display: flex; flex-direction: column; }
         .customer-select-section { position: relative; margin-bottom: 16px; }
         .customer-select-section label { font-size: 12px; color: #64748b; display: block; margin-bottom: 4px; }
         .customer-input-row { display: flex; position: relative; }
         .clear-cust-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #64748b; cursor: pointer; font-weight: bold; }
         .create-new-prompt { color: #0284c7; background: #f0fdf4; width: 100%; justify-content: flex-start; }
-
         .cart-items-wrapper { min-height: 200px; max-height: 320px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; }
         .cart-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .cart-table th { background: #f1f5f9; padding: 8px 10px; text-align: left; color: #475569; }
         .cart-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
         .empty-cart-text { text-align: center; color: #94a3b8; padding: 40px 0; margin: 0; font-size: 13px; }
-
         .qty-controls { display: flex; align-items: center; gap: 6px; }
         .qty-controls button { background: #e2e8f0; border: none; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; font-weight: bold; }
         .remove-btn { background: none; border: none; color: #ef4444; cursor: pointer; font-weight: bold; font-size: 14px; }
-
         .price-edit-cell { display: flex; flex-direction: column; gap: 2px; }
         .table-price-input { width: 80px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
         .original-price-strike { font-size: 11px; color: #94a3b8; text-decoration: line-through; }
-
         .cart-summary { border-top: 1px solid #e2e8f0; padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
         .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #64748b; }
         .strike-text { text-decoration: line-through; color: #94a3b8; }
         .adjustment-row { margin-bottom: 4px; }
         .custom-total-input { width: 120px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; text-align: right; }
-
         .total-row { display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: bold; margin-top: 4px; margin-bottom: 10px; color: #0f172a; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
         .grand-total { font-size: 20px; color: #16a34a; }
         .checkout-btn { width: 100%; background: #16a34a; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; }
         .checkout-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
-
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
         .modal { background: white; padding: 24px; border-radius: 8px; width: 400px; display: flex; flex-direction: column; gap: 10px; }
         .modal input { padding: 10px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; box-sizing: border-box; }

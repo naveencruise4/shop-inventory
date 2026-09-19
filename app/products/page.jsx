@@ -27,7 +27,9 @@ export default function ProductsPage() {
     selling_price: '',
     margin_pct: '',
     purchase_date: new Date().toISOString().split('T')[0],
-    min_stock_level: 3
+    min_stock_level: 3,
+    has_gst: false,
+    gst_percentage: '18'
   });
 
   const [editProd, setEditProd] = useState({ selling_price: '', margin_pct: '' });
@@ -151,7 +153,9 @@ export default function ProductsPage() {
       min_stock_level: Number(newProd.min_stock_level),
       stock_quantity: initQty,
       total_stock: initQty,
-      avg_cost_price: costPrice
+      avg_cost_price: costPrice,
+      has_gst: newProd.has_gst,
+      gst_percentage: newProd.has_gst ? Number(newProd.gst_percentage) : 0.00
     }]).select().single();
 
     if (prodErr) {
@@ -170,7 +174,7 @@ export default function ProductsPage() {
     }
 
     setShowAddModal(false);
-    setNewProd({ sku: '', name: '', category_name: 'General', initial_quantity: '0', purchase_price: '', selling_price: '', margin_pct: '', purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3 });
+    setNewProd({ sku: '', name: '', category_name: 'General', initial_quantity: '0', purchase_price: '', selling_price: '', margin_pct: '', purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3, has_gst: false, gst_percentage: '18' });
     fetchProducts();
   };
 
@@ -247,6 +251,11 @@ export default function ProductsPage() {
                 <div>
                   <h2>{selectedProduct.name}</h2>
                   <span className="sku-badge">SKU: {selectedProduct.sku}</span>
+                  {selectedProduct.has_gst && (
+                    <span className="sku-badge" style={{ marginLeft: '8px', background: '#e0f2fe', color: '#0369a1' }}>
+                      GST {selectedProduct.gst_percentage}% Included
+                    </span>
+                  )}
                 </div>
                 <div className="btn-group">
                   <button className="secondary-btn" onClick={() => {
@@ -262,8 +271,13 @@ export default function ProductsPage() {
 
               <div className="metrics-bar">
                 <div className="metric">
-                  <span className="label">Selling Price</span>
+                  <span className="label">Selling Price (Inclusive)</span>
                   <span className="val">₹{Number(selectedProduct.selling_price).toLocaleString()}</span>
+                  {selectedProduct.has_gst && (
+                    <span className="subtext">
+                      Base: ₹{(selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100)).toFixed(2)}
+                    </span>
+                  )}
                 </div>
                 <div className="metric">
                   <span className="label">Avg Cost Price</span>
@@ -300,13 +314,21 @@ export default function ProductsPage() {
                     <p><strong>Category:</strong> {selectedProduct.category_name}</p>
                     <p><strong>Stock Status:</strong> <span className={`status-tag ${selectedProduct.status?.toLowerCase().replace(/\s+/g, '-')}`}>{selectedProduct.status}</span></p>
                     <p><strong>Min Reorder Level:</strong> {selectedProduct.min_stock_level || 3} units</p>
+                    <p><strong>Tax Rate:</strong> {selectedProduct.has_gst ? `${selectedProduct.gst_percentage}% (Tax-inclusive)` : 'Non-GST / Exempt'}</p>
                   </div>
                   <div className="card">
-                    <h4>Margin Analysis</h4>
+                    <h4>Margin & Tax Breakdown</h4>
                     {selectedProduct.selling_price > 0 && (
                       <>
                         <p><strong>Gross Profit/Unit:</strong> ₹{(selectedProduct.selling_price - selectedProduct.avg_cost_price).toFixed(2)}</p>
                         <p><strong>Margin %:</strong> {(((selectedProduct.selling_price - selectedProduct.avg_cost_price) / selectedProduct.selling_price) * 100).toFixed(1)}%</p>
+                        {selectedProduct.has_gst && (
+                          <>
+                            <hr style={{ margin: '10px 0', border: '0', borderTop: '1px dashed #e2e8f0' }} />
+                            <p><strong>Tax Base Price:</strong> ₹{(selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100)).toFixed(2)}</p>
+                            <p><strong>GST Tax Extracted:</strong> ₹{(selectedProduct.selling_price - (selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100))).toFixed(2)}</p>
+                          </>
+                        )}
                       </>
                     )}
                   </div>
@@ -404,6 +426,7 @@ export default function ProductsPage() {
                     <th>Product</th>
                     <th>Category</th>
                     <th>Selling Price</th>
+                    <th>GST</th>
                     <th>Available Stock</th>
                     <th>Status</th>
                   </tr>
@@ -415,6 +438,7 @@ export default function ProductsPage() {
                       <td>{p.name}</td>
                       <td>{p.category_name}</td>
                       <td>₹{Number(p.selling_price).toLocaleString()}</td>
+                      <td>{p.has_gst ? `${p.gst_percentage}%` : 'None'}</td>
                       <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
                       <td>
                         <span className={`status-tag ${p.status?.toLowerCase().replace(/\s+/g, '-')}`}>
@@ -469,6 +493,43 @@ export default function ProductsPage() {
                     <label>Margin % <span className="required">*</span></label>
                     <input type="number" step="0.1" placeholder="0.0" value={newProd.margin_pct} onChange={(e) => handleNewProdPriceChange('margin_pct', e.target.value)} required />
                   </div>
+                </div>
+
+                {/* GST Configuration Panel */}
+                <div className="form-group" style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={newProd.has_gst} 
+                      onChange={(e) => setNewProd({ ...newProd, has_gst: e.target.checked })} 
+                      style={{ width: 'auto', margin: 0 }}
+                    />
+                    Price Includes GST
+                  </label>
+                  
+                  {newProd.has_gst && (
+                    <div style={{ marginTop: '10px' }}>
+                      <label style={{ fontSize: '12px', color: '#475569' }}>GST Tax Rate (%)</label>
+                      <select 
+                        value={newProd.gst_percentage} 
+                        onChange={(e) => setNewProd({ ...newProd, gst_percentage: e.target.value })}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', marginTop: '4px' }}
+                      >
+                        <option value="0">0%</option>
+                        <option value="5">5%</option>
+                        <option value="12">12%</option>
+                        <option value="18">18%</option>
+                        <option value="28">28%</option>
+                      </select>
+                      
+                      {Number(newProd.selling_price) > 0 && (
+                        <div style={{ marginTop: '8px', fontSize: '11px', color: '#0284c7', background: '#e0f2fe', padding: '6px 8px', borderRadius: '4px' }}>
+                          Base Price (Excl. Tax): ₹{(Number(newProd.selling_price) / (1 + Number(newProd.gst_percentage) / 100)).toFixed(2)} | 
+                          GST Tax: ₹{(Number(newProd.selling_price) - (Number(newProd.selling_price) / (1 + Number(newProd.gst_percentage) / 100))).toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="form-row">
@@ -553,18 +614,8 @@ export default function ProductsPage() {
 
       <style jsx>{`
         .layout { display: flex; min-height: 100vh; background: #f8fafc; }
-        .content { 
-            flex: 1; 
-            padding: 24px; 
-            box-sizing: border-box; 
-            }
-
-            @media (max-width: 768px) {
-            .content {
-                padding: 16px;
-                padding-bottom: 90px; /* Leaves space so bottom bar doesn't overlap tables or buttons */
-            }
-        }
+        .content { flex: 1; padding: 24px; box-sizing: border-box; }
+        @media (max-width: 768px) { .content { padding: 16px; padding-bottom: 90px; } }
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .primary-btn, .action-btn { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
         .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
@@ -578,12 +629,10 @@ export default function ProductsPage() {
         .clickable-row { cursor: pointer; transition: background 0.15s; }
         .clickable-row:hover { background: #f8fafc; }
         .subtext { font-size: 12px; color: #94a3b8; }
-        
         .status-tag { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
         .status-tag.healthy { background: #dcfce7; color: #15803d; }
         .status-tag.low { background: #fef9c3; color: #a16207; }
         .status-tag.out-of-stock { background: #fee2e2; color: #b91c1c; }
-
         .back-btn { background: none; border: none; color: #0284c7; cursor: pointer; margin-bottom: 12px; font-size: 14px; padding: 0; }
         .header-card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; }
         .header-main { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
@@ -593,11 +642,9 @@ export default function ProductsPage() {
         .metric .label { font-size: 12px; color: #64748b; }
         .metric .val { font-size: 18px; font-weight: bold; }
         .text-green { color: #16a34a; }
-
         .tabs { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px; }
         .tab { background: none; border: none; padding: 10px 16px; cursor: pointer; color: #64748b; font-weight: 500; border-bottom: 2px solid transparent; }
         .tab.active { color: #0f172a; border-bottom-color: #0f172a; }
-
         .card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 16px; }
         .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
         .stock-breakdown { display: flex; gap: 16px; margin-top: 12px; }
@@ -605,17 +652,13 @@ export default function ProductsPage() {
         .stock-box.green { background: #f0fdf4; border-color: #bbf7d0; }
         .stock-box .num { display: block; font-size: 24px; font-weight: bold; }
         .stock-box .lbl { font-size: 12px; color: #64748b; }
-
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
         .modal { background: white; padding: 24px; border-radius: 8px; width: 480px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-        
         .form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; margin-bottom: 10px; }
         .form-group label { font-size: 13px; font-weight: 600; color: #334155; }
         .required { color: #ef4444; }
-
         .modal input { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; width: 100%; }
         .modal input:focus { outline: none; border-color: #0f172a; }
-        
         .form-row { display: flex; gap: 12px; }
         .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
         .cancel-btn { flex: 1; padding: 10px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
