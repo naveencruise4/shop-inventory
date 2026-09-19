@@ -74,6 +74,9 @@ export default function POSPage() {
       return;
     }
 
+    const hasGst = product.has_gst ?? false;
+    const gstPct = Number(product.gst_percentage || 0);
+
     const existingIndex = cart.findIndex(item => item.id === product.id);
     if (existingIndex > -1) {
       const updatedCart = [...cart];
@@ -90,8 +93,8 @@ export default function POSPage() {
         quantity: 1,
         originalPrice: product.selling_price,
         price: product.selling_price,
-        has_gst: product.has_gst || false,
-        gst_percentage: product.gst_percentage || 0
+        has_gst: hasGst,
+        gst_percentage: gstPct
       }]);
     }
     setSearchTerm('');
@@ -131,15 +134,17 @@ export default function POSPage() {
     return cart.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
   };
 
-  // Tax summaries derived dynamically from inclusive prices
+  // Accurate Item-Level & Grand Total GST Calculations
   const calculateTotalGSTBreakdown = () => {
     let totalBase = 0;
     let totalGst = 0;
 
     cart.forEach(item => {
       const itemInclusiveTotal = item.price * item.quantity;
-      if (item.has_gst && item.gst_percentage > 0) {
-        const base = itemInclusiveTotal / (1 + item.gst_percentage / 100);
+      const pct = Number(item.gst_percentage || 0);
+
+      if (item.has_gst && pct > 0) {
+        const base = itemInclusiveTotal / (1 + pct / 100);
         const gst = itemInclusiveTotal - base;
         totalBase += base;
         totalGst += gst;
@@ -217,12 +222,15 @@ export default function POSPage() {
       const actualPaidAmount = amountPaid !== '' ? Number(amountPaid) : finalTotal;
 
       const itemsPayload = cart.map(item => {
-        const basePrice = item.has_gst && item.gst_percentage > 0 
-          ? Number((item.price / (1 + item.gst_percentage / 100)).toFixed(2))
+        const pct = Number(item.gst_percentage || 0);
+        const isTaxed = item.has_gst && pct > 0;
+
+        const baseUnitPrice = isTaxed 
+          ? Number((item.price / (1 + pct / 100)).toFixed(2))
           : item.price;
         
-        const gstVal = item.has_gst && item.gst_percentage > 0
-          ? Number((item.price - basePrice).toFixed(2))
+        const unitGstAmount = isTaxed
+          ? Number((item.price - baseUnitPrice).toFixed(2))
           : 0;
 
         return {
@@ -232,9 +240,9 @@ export default function POSPage() {
           price: item.price,
           unit_price: item.price,
           has_gst: item.has_gst,
-          gst_percentage: item.gst_percentage,
-          base_price: basePrice,
-          gst_amount: gstVal * item.quantity
+          gst_percentage: pct,
+          base_price: baseUnitPrice,
+          gst_amount: unitGstAmount * item.quantity
         };
       });
 
@@ -298,7 +306,11 @@ export default function POSPage() {
                         <div key={p.id} className="dropdown-item" onClick={() => addToCart(p)}>
                           <div>
                             <strong>{p.name}</strong> <span className="subtext">({p.sku})</span>
-                            {p.has_gst && <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', marginLeft: '6px', padding: '2px 4px', borderRadius: '4px' }}>GST {p.gst_percentage}%</span>}
+                            {p.has_gst && Number(p.gst_percentage) > 0 && (
+                              <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', marginLeft: '6px', padding: '2px 4px', borderRadius: '4px' }}>
+                                GST {p.gst_percentage}%
+                              </span>
+                            )}
                           </div>
                           <div className="dropdown-right">
                             <span className="price">₹{p.selling_price}</span>
@@ -394,43 +406,55 @@ export default function POSPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {cart.map(item => (
-                        <tr key={item.id}>
-                          <td>
-                            <strong>{item.name}</strong><br/>
-                            <span className="subtext">{item.sku}</span>
-                            {item.has_gst && item.gst_percentage > 0 && (
-                              <span style={{ display: 'block', fontSize: '10px', color: '#0369a1' }}>
-                                Incl. GST {item.gst_percentage}% (Base: ₹{(item.price / (1 + item.gst_percentage / 100)).toFixed(2)})
-                              </span>
-                            )}
-                          </td>
-                          <td>
-                            <div className="qty-controls">
-                              <button onClick={() => updateCartQuantity(item.id, -1)}>-</button>
-                              <span>{item.quantity}</span>
-                              <button onClick={() => updateCartQuantity(item.id, 1)}>+</button>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="price-edit-cell">
-                              <input 
-                                type="number" 
-                                value={item.price} 
-                                onChange={(e) => handleItemPriceChange(item.id, e.target.value)}
-                                className="table-price-input"
-                              />
-                              {item.price !== item.originalPrice && (
-                                <span className="original-price-strike">₹{item.originalPrice}</span>
+                      {cart.map(item => {
+                        const pct = Number(item.gst_percentage || 0);
+                        const isTaxed = item.has_gst && pct > 0;
+                        const lineTotal = item.price * item.quantity;
+                        const baseUnit = isTaxed ? (item.price / (1 + pct / 100)) : item.price;
+                        const lineGst = isTaxed ? (lineTotal - (baseUnit * item.quantity)) : 0;
+
+                        return (
+                          <tr key={item.id}>
+                            <td>
+                              <strong>{item.name}</strong><br/>
+                              <span className="subtext">{item.sku}</span>
+                              {isTaxed ? (
+                                <span style={{ display: 'block', fontSize: '10px', color: '#0369a1', marginTop: '2px' }}>
+                                  Incl. {pct}% GST (Base: ₹{baseUnit.toFixed(2)} | GST: ₹{(lineGst / item.quantity).toFixed(2)})
+                                </span>
+                              ) : (
+                                <span style={{ display: 'block', fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+                                  Non-GST / Exempt
+                                </span>
                               )}
-                            </div>
-                          </td>
-                          <td>₹{(item.price * item.quantity).toFixed(2)}</td>
-                          <td>
-                            <button className="remove-btn" onClick={() => removeFromCart(item.id)}>✕</button>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td>
+                              <div className="qty-controls">
+                                <button onClick={() => updateCartQuantity(item.id, -1)}>-</button>
+                                <span>{item.quantity}</span>
+                                <button onClick={() => updateCartQuantity(item.id, 1)}>+</button>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="price-edit-cell">
+                                <input 
+                                  type="number" 
+                                  value={item.price} 
+                                  onChange={(e) => handleItemPriceChange(item.id, e.target.value)}
+                                  className="table-price-input"
+                                />
+                                {item.price !== item.originalPrice && (
+                                  <span className="original-price-strike">₹{item.originalPrice}</span>
+                                )}
+                              </div>
+                            </td>
+                            <td>₹{lineTotal.toFixed(2)}</td>
+                            <td>
+                              <button className="remove-btn" onClick={() => removeFromCart(item.id)}>✕</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -443,9 +467,9 @@ export default function POSPage() {
                 </div>
 
                 {cart.length > 0 && (
-                  <div className="summary-row" style={{ fontSize: '12px', background: '#f1f5f9', padding: '6px 8px', borderRadius: '4px' }}>
+                  <div className="summary-row" style={{ fontSize: '12px', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '6px 8px', borderRadius: '4px', color: '#0369a1' }}>
                     <span>Tax Breakdown:</span>
-                    <span>Base: ₹{totalBase.toFixed(2)} | GST: ₹{totalGst.toFixed(2)}</span>
+                    <span>Base: ₹{totalBase.toFixed(2)} | Total GST: ₹{totalGst.toFixed(2)}</span>
                   </div>
                 )}
                 

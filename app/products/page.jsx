@@ -28,6 +28,10 @@ export default function ProductsPage() {
     margin_pct: '',
     purchase_date: new Date().toISOString().split('T')[0],
     min_stock_level: 3,
+    // Purchase GST
+    has_purchase_gst: false,
+    purchase_gst_percentage: '18',
+    // Selling GST
     has_gst: false,
     gst_percentage: '18'
   });
@@ -154,6 +158,8 @@ export default function ProductsPage() {
       stock_quantity: initQty,
       total_stock: initQty,
       avg_cost_price: costPrice,
+      has_purchase_gst: newProd.has_purchase_gst,
+      purchase_gst_percentage: newProd.has_purchase_gst ? Number(newProd.purchase_gst_percentage) : 0.00,
       has_gst: newProd.has_gst,
       gst_percentage: newProd.has_gst ? Number(newProd.gst_percentage) : 0.00
     }]).select().single();
@@ -174,7 +180,13 @@ export default function ProductsPage() {
     }
 
     setShowAddModal(false);
-    setNewProd({ sku: '', name: '', category_name: 'General', initial_quantity: '0', purchase_price: '', selling_price: '', margin_pct: '', purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3, has_gst: false, gst_percentage: '18' });
+    setNewProd({ 
+      sku: '', name: '', category_name: 'General', initial_quantity: '0', 
+      purchase_price: '', selling_price: '', margin_pct: '', 
+      purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3, 
+      has_purchase_gst: false, purchase_gst_percentage: '18',
+      has_gst: false, gst_percentage: '18' 
+    });
     fetchProducts();
   };
 
@@ -253,7 +265,12 @@ export default function ProductsPage() {
                   <span className="sku-badge">SKU: {selectedProduct.sku}</span>
                   {selectedProduct.has_gst && (
                     <span className="sku-badge" style={{ marginLeft: '8px', background: '#e0f2fe', color: '#0369a1' }}>
-                      GST {selectedProduct.gst_percentage}% Included
+                      Selling GST {selectedProduct.gst_percentage}%
+                    </span>
+                  )}
+                  {selectedProduct.has_purchase_gst && (
+                    <span className="sku-badge" style={{ marginLeft: '8px', background: '#fef3c7', color: '#92400e' }}>
+                      Purchase GST {selectedProduct.purchase_gst_percentage}%
                     </span>
                   )}
                 </div>
@@ -280,8 +297,13 @@ export default function ProductsPage() {
                   )}
                 </div>
                 <div className="metric">
-                  <span className="label">Avg Cost Price</span>
+                  <span className="label">Avg Purchase Cost</span>
                   <span className="val">₹{Number(selectedProduct.avg_cost_price).toLocaleString()}</span>
+                  {selectedProduct.has_purchase_gst && (
+                    <span className="subtext">
+                      Base: ₹{(selectedProduct.avg_cost_price / (1 + selectedProduct.purchase_gst_percentage / 100)).toFixed(2)}
+                    </span>
+                  )}
                 </div>
                 <div className="metric">
                   <span className="label">Total Stock</span>
@@ -314,7 +336,8 @@ export default function ProductsPage() {
                     <p><strong>Category:</strong> {selectedProduct.category_name}</p>
                     <p><strong>Stock Status:</strong> <span className={`status-tag ${selectedProduct.status?.toLowerCase().replace(/\s+/g, '-')}`}>{selectedProduct.status}</span></p>
                     <p><strong>Min Reorder Level:</strong> {selectedProduct.min_stock_level || 3} units</p>
-                    <p><strong>Tax Rate:</strong> {selectedProduct.has_gst ? `${selectedProduct.gst_percentage}% (Tax-inclusive)` : 'Non-GST / Exempt'}</p>
+                    <p><strong>Selling Tax Rate:</strong> {selectedProduct.has_gst ? `${selectedProduct.gst_percentage}% (Tax-inclusive)` : 'Non-GST / Exempt'}</p>
+                    <p><strong>Purchase Tax Rate:</strong> {selectedProduct.has_purchase_gst ? `${selectedProduct.purchase_gst_percentage}% (Tax-inclusive)` : 'Non-GST / Exempt'}</p>
                   </div>
                   <div className="card">
                     <h4>Margin & Tax Breakdown</h4>
@@ -322,11 +345,18 @@ export default function ProductsPage() {
                       <>
                         <p><strong>Gross Profit/Unit:</strong> ₹{(selectedProduct.selling_price - selectedProduct.avg_cost_price).toFixed(2)}</p>
                         <p><strong>Margin %:</strong> {(((selectedProduct.selling_price - selectedProduct.avg_cost_price) / selectedProduct.selling_price) * 100).toFixed(1)}%</p>
+                        
+                        <hr style={{ margin: '10px 0', border: '0', borderTop: '1px dashed #e2e8f0' }} />
                         {selectedProduct.has_gst && (
                           <>
-                            <hr style={{ margin: '10px 0', border: '0', borderTop: '1px dashed #e2e8f0' }} />
-                            <p><strong>Tax Base Price:</strong> ₹{(selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100)).toFixed(2)}</p>
-                            <p><strong>GST Tax Extracted:</strong> ₹{(selectedProduct.selling_price - (selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100))).toFixed(2)}</p>
+                            <p><strong>Selling Tax Base Price:</strong> ₹{(selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100)).toFixed(2)}</p>
+                            <p><strong>Output GST (Sales):</strong> ₹{(selectedProduct.selling_price - (selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100))).toFixed(2)}</p>
+                          </>
+                        )}
+                        {selectedProduct.has_purchase_gst && (
+                          <>
+                            <p style={{ marginTop: '6px' }}><strong>Purchase Tax Base Price:</strong> ₹{(selectedProduct.avg_cost_price / (1 + selectedProduct.purchase_gst_percentage / 100)).toFixed(2)}</p>
+                            <p><strong>Input GST (Purchases):</strong> ₹{(selectedProduct.avg_cost_price - (selectedProduct.avg_cost_price / (1 + selectedProduct.purchase_gst_percentage / 100))).toFixed(2)}</p>
                           </>
                         )}
                       </>
@@ -426,7 +456,9 @@ export default function ProductsPage() {
                     <th>Product</th>
                     <th>Category</th>
                     <th>Selling Price</th>
-                    <th>GST</th>
+                    <th>Selling GST</th>
+                    <th>Purchase Price</th>
+                    <th>Purchase GST</th>
                     <th>Available Stock</th>
                     <th>Status</th>
                   </tr>
@@ -439,6 +471,8 @@ export default function ProductsPage() {
                       <td>{p.category_name}</td>
                       <td>₹{Number(p.selling_price).toLocaleString()}</td>
                       <td>{p.has_gst ? `${p.gst_percentage}%` : 'None'}</td>
+                      <td>₹{Number(p.avg_cost_price || 0).toLocaleString()}</td>
+                      <td>{p.has_purchase_gst ? `${p.purchase_gst_percentage}%` : 'None'}</td>
                       <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
                       <td>
                         <span className={`status-tag ${p.status?.toLowerCase().replace(/\s+/g, '-')}`}>
@@ -484,6 +518,43 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
+                {/* PURCHASE GST PANEL */}
+                <div className="form-group" style={{ background: '#fefce8', padding: '12px', borderRadius: '6px', border: '1px solid #fef08a' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', color: '#854d0e' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={newProd.has_purchase_gst} 
+                      onChange={(e) => setNewProd({ ...newProd, has_purchase_gst: e.target.checked })} 
+                      style={{ width: 'auto', margin: 0 }}
+                    />
+                    Purchase Price Includes GST
+                  </label>
+                  
+                  {newProd.has_purchase_gst && (
+                    <div style={{ marginTop: '10px' }}>
+                      <label style={{ fontSize: '12px', color: '#854d0e' }}>Purchase GST Rate (%)</label>
+                      <select 
+                        value={newProd.purchase_gst_percentage} 
+                        onChange={(e) => setNewProd({ ...newProd, purchase_gst_percentage: e.target.value })}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #fde047', marginTop: '4px' }}
+                      >
+                        <option value="0">0%</option>
+                        <option value="5">5%</option>
+                        <option value="12">12%</option>
+                        <option value="18">18%</option>
+                        <option value="28">28%</option>
+                      </select>
+                      
+                      {Number(newProd.purchase_price) > 0 && (
+                        <div style={{ marginTop: '8px', fontSize: '11px', color: '#a16207', background: '#fef3c7', padding: '6px 8px', borderRadius: '4px' }}>
+                          Base Cost (Excl. Tax): ₹{(Number(newProd.purchase_price) / (1 + Number(newProd.purchase_gst_percentage) / 100)).toFixed(2)} | 
+                          Input GST: ₹{(Number(newProd.purchase_price) - (Number(newProd.purchase_price) / (1 + Number(newProd.purchase_gst_percentage) / 100))).toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="form-row">
                   <div className="form-group">
                     <label>Selling Price (₹) <span className="required">*</span></label>
@@ -495,25 +566,25 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                {/* GST Configuration Panel */}
-                <div className="form-group" style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>
+                {/* SELLING GST PANEL */}
+                <div className="form-group" style={{ background: '#f0f9ff', padding: '12px', borderRadius: '6px', border: '1px solid #bae6fd' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', color: '#0369a1' }}>
                     <input 
                       type="checkbox" 
                       checked={newProd.has_gst} 
                       onChange={(e) => setNewProd({ ...newProd, has_gst: e.target.checked })} 
                       style={{ width: 'auto', margin: 0 }}
                     />
-                    Price Includes GST
+                    Selling Price Includes GST
                   </label>
                   
                   {newProd.has_gst && (
                     <div style={{ marginTop: '10px' }}>
-                      <label style={{ fontSize: '12px', color: '#475569' }}>GST Tax Rate (%)</label>
+                      <label style={{ fontSize: '12px', color: '#0369a1' }}>Selling GST Rate (%)</label>
                       <select 
                         value={newProd.gst_percentage} 
                         onChange={(e) => setNewProd({ ...newProd, gst_percentage: e.target.value })}
-                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', marginTop: '4px' }}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #7dd3fc', marginTop: '4px' }}
                       >
                         <option value="0">0%</option>
                         <option value="5">5%</option>
@@ -525,7 +596,7 @@ export default function ProductsPage() {
                       {Number(newProd.selling_price) > 0 && (
                         <div style={{ marginTop: '8px', fontSize: '11px', color: '#0284c7', background: '#e0f2fe', padding: '6px 8px', borderRadius: '4px' }}>
                           Base Price (Excl. Tax): ₹{(Number(newProd.selling_price) / (1 + Number(newProd.gst_percentage) / 100)).toFixed(2)} | 
-                          GST Tax: ₹{(Number(newProd.selling_price) - (Number(newProd.selling_price) / (1 + Number(newProd.gst_percentage) / 100))).toFixed(2)}
+                          Output GST: ₹{(Number(newProd.selling_price) - (Number(newProd.selling_price) / (1 + Number(newProd.gst_percentage) / 100))).toFixed(2)}
                         </div>
                       )}
                     </div>
