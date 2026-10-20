@@ -1,2 +1,5 @@
 # Ignore all files ending in .log anywhere in the project
 .env.local
+package-lock.json
+node_modules
+.next
