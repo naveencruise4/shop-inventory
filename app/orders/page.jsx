@@ -549,7 +549,7 @@ export default function OrdersPage() {
               <div id="printable-receipt" className="receipt-box">
                 <div className="receipt-header">
                   <h2>{selectedOrder.shopName}</h2>
-                  <p className="receipt-subtitle">Tax Invoice / Retail Receipt</p>
+                  <p className="receipt-subtitle">Estimate</p>
                   <div className="receipt-meta">
                     <div><strong>Date:</strong> {selectedOrder.date}</div>
                     <div><strong>Order ID:</strong> {selectedOrder.saleId?.slice(0, 8)}</div>
