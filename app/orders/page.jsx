@@ -698,37 +698,41 @@ export default function OrdersPage() {
 
         @media print {
           @page {
-            size: A5 landscape;
-            margin: 8mm;
+            size: A4 portrait;
+            margin: 0; /* Remove browser default headers/footers */
           }
 
           html,
           body {
             margin: 0 !important;
             padding: 0 !important;
-            width: auto !important;
-            height: auto !important;
-            min-height: 0 !important;
-            overflow: visible !important;
+            width: 210mm !important;
+            height: 297mm !important;
+            overflow: hidden !important;
             background: #fff !important;
           }
 
+          /* Hide background Web App UI */
           body > *:not(#print-mount-root) {
             display: none !important;
           }
 
+          /* Mount root container constrained to top-half A5 dimensions */
           body > #print-mount-root {
             display: block !important;
-            position: static !important;
-            width: 100% !important;
-            height: auto !important;
-            min-height: 0 !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 210mm !important;
+            height: 148mm !important; /* Exactly half of A4 portrait height */
             margin: 0 !important;
-            padding: 0 !important;
-            overflow: visible !important;
+            padding: 8mm !important; /* Inner receipt padding */
             box-sizing: border-box !important;
-            color: #000 !important;
+            overflow: hidden !important;
             background: #fff !important;
+            color: #000 !important;
+            page-break-after: avoid !important;
+            page-break-inside: avoid !important;
           }
 
           #print-mount-root,
@@ -738,17 +742,12 @@ export default function OrdersPage() {
 
           #print-mount-root .receipt-box {
             display: block !important;
-            position: static !important;
             width: 100% !important;
-            max-width: none !important;
-            height: auto !important;
-            min-height: 0 !important;
-            max-height: none !important;
+            height: 100% !important;
+            max-height: 132mm !important;
             margin: 0 !important;
             padding: 0 !important;
-            overflow: visible !important;
             border: 0 !important;
-            border-radius: 0 !important;
             box-shadow: none !important;
             font-family: Arial, sans-serif !important;
             color: #000 !important;
