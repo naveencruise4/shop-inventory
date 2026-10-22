@@ -42,13 +42,10 @@ export default function POSPage() {
   const [amountPaid, setAmountPaid] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [saleStatus, setSaleStatus] = useState('completed');
-<<<<<<< HEAD
-=======
 
   // Print Receipt State
   const [completedOrder, setCompletedOrder] = useState(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
->>>>>>> n1.0
 
   useEffect(() => {
     fetchInitialData();
@@ -257,10 +254,6 @@ export default function POSPage() {
     return cart.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
   };
 
-<<<<<<< HEAD
-  // Accurate Item-Level & Grand Total GST Calculations
-=======
->>>>>>> n1.0
   const calculateTotalGSTBreakdown = () => {
     let totalBase = 0;
     let totalGst = 0;
@@ -360,10 +353,7 @@ export default function POSPage() {
         return {
           product_id: item.id,
           sku: item.sku,
-<<<<<<< HEAD
-=======
           name: item.name,
->>>>>>> n1.0
           quantity: item.quantity,
           price: item.price,
           unit_price: item.price,
@@ -423,8 +413,6 @@ export default function POSPage() {
     }
   };
 
-<<<<<<< HEAD
-=======
   const handlePrint = () => {
     const receiptElement = document.getElementById('printable-receipt');
     if (!receiptElement) return;
@@ -455,7 +443,6 @@ export default function POSPage() {
     }
   };
 
->>>>>>> n1.0
   const { totalBase, totalGst } = calculateTotalGSTBreakdown();
 
   return (
@@ -927,10 +914,6 @@ export default function POSPage() {
         .customer-input-row { display: flex; position: relative; }
         .clear-cust-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #64748b; cursor: pointer; font-weight: bold; }
         .create-new-prompt { color: #0284c7; background: #f0fdf4; width: 100%; justify-content: flex-start; }
-<<<<<<< HEAD
-=======
-        
->>>>>>> n1.0
         .cart-items-wrapper { min-height: 200px; max-height: 320px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; }
         .cart-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .cart-table th { background: #f1f5f9; padding: 8px 10px; text-align: left; color: #475569; }

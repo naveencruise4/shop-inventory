@@ -590,43 +590,6 @@ export default function ProductsPage() {
               </div>
             </div>
 
-<<<<<<< HEAD
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>Product</th>
-                    <th>Category</th>
-                    <th>Selling Price</th>
-                    <th>Selling GST</th>
-                    <th>Purchase Price</th>
-                    <th>Purchase GST</th>
-                    <th>Available Stock</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredProducts.map(p => (
-                    <tr key={p.id} className="clickable-row" onClick={() => setSelectedProduct(p)}>
-                      <td><strong>{p.sku}</strong></td>
-                      <td>{p.name}</td>
-                      <td>{p.category_name}</td>
-                      <td>₹{Number(p.selling_price).toLocaleString()}</td>
-                      <td>{p.has_gst ? `${p.gst_percentage}%` : 'None'}</td>
-                      <td>₹{Number(p.avg_cost_price || 0).toLocaleString()}</td>
-                      <td>{p.has_purchase_gst ? `${p.purchase_gst_percentage}%` : 'None'}</td>
-                      <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
-                      <td>
-                        <span className={`status-tag ${p.status?.toLowerCase().replace(/\s+/g, '-')}`}>
-                          {p.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-=======
             {/* PRODUCTS TABLE WITH SERVER-SIDE PAGINATION */}
             <div className="table-wrapper card" style={{ marginTop: '16px' }}>
               {loading ? (
@@ -642,6 +605,7 @@ export default function ProductsPage() {
                         <th>Product Name</th>
                         <th>Category</th>
                         <th>Selling Price</th>
+                        <th>Selling GST</th>
                         <th>Available Stock</th>
                         <th>Status</th>
                       </tr>
@@ -653,6 +617,7 @@ export default function ProductsPage() {
                           <td>{p.name}</td>
                           <td>{p.category_name}</td>
                           <td>₹{Number(p.selling_price).toLocaleString()}</td>
+                          <td>{p.has_gst ? `${p.gst_percentage}%` : 'None'}</td>
                           <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
                           <td>
                             <span className={`status-tag ${(p.status || '').toLowerCase().replace(/\s+/g, '-')}`}>
@@ -703,7 +668,6 @@ export default function ProductsPage() {
                   </div>
                 </>
               )}
->>>>>>> n1.0
             </div>
           </>
         )}
@@ -908,15 +872,11 @@ export default function ProductsPage() {
       <style jsx>{`
         .layout { display: flex; min-height: 100vh; background: #f8fafc; }
         .content { flex: 1; padding: 24px; box-sizing: border-box; }
-<<<<<<< HEAD
-        @media (max-width: 768px) { .content { padding: 16px; padding-bottom: 90px; } }
-=======
 
         @media (max-width: 768px) {
           .content { padding: 16px; padding-bottom: 90px; }
         }
 
->>>>>>> n1.0
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .primary-btn, .action-btn { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
         .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
@@ -947,13 +907,10 @@ export default function ProductsPage() {
         .clickable-row { cursor: pointer; transition: background 0.15s; }
         .clickable-row:hover { background: #f8fafc; }
         .subtext { font-size: 12px; color: #94a3b8; }
-<<<<<<< HEAD
         .status-tag { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
         .status-tag.healthy { background: #dcfce7; color: #15803d; }
         .status-tag.low { background: #fef9c3; color: #a16207; }
         .status-tag.out-of-stock { background: #fee2e2; color: #b91c1c; }
-=======
-        
         .status-tag { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
         .status-tag.healthy { background: #dcfce7; color: #15803d; }
         .status-tag.low { background: #fef9c3; color: #a16207; }
@@ -967,7 +924,6 @@ export default function ProductsPage() {
         .page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .page-indicator { color: #475569; }
 
->>>>>>> n1.0
         .back-btn { background: none; border: none; color: #0284c7; cursor: pointer; margin-bottom: 12px; font-size: 14px; padding: 0; }
         .header-card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; }
         .header-main { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
