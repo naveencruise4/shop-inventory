@@ -2,16 +2,33 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Sidebar from '@/components/Sidebar';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
-  const [search, setSearch] = useState('');
+  const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [shopId, setShopId] = useState(null);
+
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
-  
+
+  // Search & Filter States
+  const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  // const [categoryFilter, setCategoryFilter] = useState('all');
+  // const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('name_asc');
+
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  // Available Categories List (Temporarily disabled dropdown)
+  // const [categoriesList, setCategoriesList] = useState([]);
+
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -43,18 +60,12 @@ export default function ProductsPage() {
   const [purchasesHistory, setPurchasesHistory] = useState([]);
   const [salesHistory, setSalesHistory] = useState([]);
 
+  // Initial authentication & shop resolution
   useEffect(() => {
-    fetchProducts();
+    initShop();
   }, []);
 
-  useEffect(() => {
-    if (selectedProduct) {
-      if (activeTab === 'purchases') fetchPurchaseHistory(selectedProduct.id);
-      if (activeTab === 'sales') fetchSalesHistory(selectedProduct.sku);
-    }
-  }, [selectedProduct, activeTab]);
-
-  const fetchProducts = async () => {
+  const initShop = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -64,16 +75,107 @@ export default function ProductsPage() {
       .eq('id', user.id)
       .single();
 
-    if (!appUser?.shop_id) return;
-
-    const { data, error } = await supabase
-      .from('vw_product_stock')
-      .select('*')
-      .eq('shop_id', appUser.shop_id);
-
-    if (data) setProducts(data);
-    if (error) console.error('Error fetching products:', error);
+    if (appUser?.shop_id) {
+      setShopId(appUser.shop_id);
+      // fetchCategories(appUser.shop_id);
+    }
   };
+
+  /*
+  const fetchCategories = async (sid) => {
+    const { data } = await supabase
+      .from('vw_product_stock')
+      .select('category_name')
+      .eq('shop_id', sid);
+
+    if (data) {
+      const unique = Array.from(new Set(data.map(d => d.category_name).filter(Boolean)));
+      setCategoriesList(unique);
+    }
+  };
+  */
+
+  // Explicit Search Form Handlers
+  const handleSearchSubmit = (e) => {
+    if (e) e.preventDefault();
+    setAppliedSearch(search.trim());
+    setCurrentPage(1);
+  };
+
+  const handleClearSearch = () => {
+    setSearch('');
+    setAppliedSearch('');
+    setCurrentPage(1);
+  };
+
+  // Main Database-Level Query
+  const fetchProducts = useCallback(async () => {
+    if (!shopId) return;
+    setLoading(true);
+
+    try {
+      let query = supabase
+        .from('vw_product_stock')
+        .select('*', { count: 'exact' })
+        .eq('shop_id', shopId);
+
+      // 1. Server-Side Multi-Field Search
+      if (appliedSearch) {
+        const q = `%${appliedSearch}%`;
+        query = query.or(`name.ilike.${q},sku.ilike.${q},category_name.ilike.${q}`);
+      }
+
+      /*
+      // 2. Server-Side Category Filter (Disabled)
+      if (categoryFilter !== 'all') {
+        query = query.eq('category_name', categoryFilter);
+      }
+
+      // 3. Server-Side Stock Status Filter (Disabled)
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'healthy') query = query.eq('status', 'Healthy');
+        if (statusFilter === 'low') query = query.eq('status', 'Low');
+        if (statusFilter === 'out-of-stock') query = query.eq('status', 'Out of Stock');
+      }
+      */
+
+      // 4. Server-Side Sorting
+      if (sortBy === 'name_asc') query = query.order('name', { ascending: true });
+      if (sortBy === 'name_desc') query = query.order('name', { ascending: false });
+      if (sortBy === 'price_asc') query = query.order('selling_price', { ascending: true });
+      if (sortBy === 'price_desc') query = query.order('selling_price', { ascending: false });
+      if (sortBy === 'stock_asc') query = query.order('available_stock', { ascending: true });
+      if (sortBy === 'stock_desc') query = query.order('available_stock', { ascending: false });
+
+      // 5. Server-Side Range Calculation for Pagination
+      const from = (currentPage - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      query = query.range(from, to);
+
+      const { data, count, error } = await query;
+
+      if (error) throw error;
+
+      setProducts(data || []);
+      setTotalCount(count || 0);
+    } catch (err) {
+      console.error('Error fetching products:', err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [shopId, appliedSearch, sortBy, currentPage, pageSize]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  useEffect(() => {
+    if (selectedProduct) {
+      if (activeTab === 'purchases') fetchPurchaseHistory(selectedProduct.id);
+      if (activeTab === 'sales') fetchSalesHistory(selectedProduct.sku);
+    }
+  }, [selectedProduct, activeTab]);
 
   const fetchPurchaseHistory = async (productId) => {
     const { data } = await supabase
@@ -92,6 +194,10 @@ export default function ProductsPage() {
       .order('created_at', { ascending: false });
     if (data) setSalesHistory(data);
   };
+
+  const totalPages = useMemo(() => {
+    return Math.ceil(totalCount / pageSize) || 1;
+  }, [totalCount, pageSize]);
 
   const handleNewProdPriceChange = (field, val) => {
     const cost = Number(newProd.purchase_price || 0);
@@ -126,30 +232,13 @@ export default function ProductsPage() {
 
   const handleCreateProduct = async (e) => {
     e.preventDefault();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (!shopId) return;
 
-    if (authError || !user) {
-      alert('You are not logged in. Please log in again.');
-      return;
-    }
-
-    const { data: appUser, error: userError } = await supabase
-      .from('users')
-      .select('shop_id')
-      .eq('id', user.id)
-      .single();
-
-    if (userError || !appUser?.shop_id) {
-      alert('Unable to load your assigned shop.');
-      return;
-    }
-
-    const currentShopId = appUser.shop_id;
     const initQty = Number(newProd.initial_quantity || 0);
     const costPrice = Number(newProd.purchase_price || 0);
 
     const { data: prodData, error: prodErr } = await supabase.from('productsinfo').insert([{
-      shop_id: currentShopId,
+      shop_id: shopId,
       sku: newProd.sku,
       name: newProd.name,
       category_name: newProd.category_name,
@@ -171,7 +260,7 @@ export default function ProductsPage() {
 
     if (initQty > 0 && prodData) {
       await supabase.from('product_purchases').insert([{
-        shop_id: currentShopId,
+        shop_id: shopId,
         product_id: prodData.id,
         quantity: initQty,
         purchase_price: costPrice,
@@ -243,12 +332,6 @@ export default function ProductsPage() {
     if (updated) setSelectedProduct(updated);
     fetchProducts();
   };
-
-  const filteredProducts = products.filter(p =>
-    p.name?.toLowerCase().includes(search.toLowerCase()) ||
-    p.sku?.toLowerCase().includes(search.toLowerCase()) ||
-    p.category_name?.toLowerCase().includes(search.toLowerCase())
-  );
 
   return (
     <div className="layout">
@@ -334,7 +417,7 @@ export default function ProductsPage() {
                   <div className="card">
                     <h4>Product Info</h4>
                     <p><strong>Category:</strong> {selectedProduct.category_name}</p>
-                    <p><strong>Stock Status:</strong> <span className={`status-tag ${selectedProduct.status?.toLowerCase().replace(/\s+/g, '-')}`}>{selectedProduct.status}</span></p>
+                    <p><strong>Stock Status:</strong> <span className={`status-tag ${(selectedProduct.status || '').toLowerCase().replace(/\s+/g, '-')}`}>{selectedProduct.status}</span></p>
                     <p><strong>Min Reorder Level:</strong> {selectedProduct.min_stock_level || 3} units</p>
                     <p><strong>Selling Tax Rate:</strong> {selectedProduct.has_gst ? `${selectedProduct.gst_percentage}% (Tax-inclusive)` : 'Non-GST / Exempt'}</p>
                     <p><strong>Purchase Tax Rate:</strong> {selectedProduct.has_purchase_gst ? `${selectedProduct.purchase_gst_percentage}% (Tax-inclusive)` : 'Non-GST / Exempt'}</p>
@@ -435,19 +518,79 @@ export default function ProductsPage() {
         ) : (
           <>
             <div className="top-bar">
-              <h1>Products</h1>
+              <div>
+                <h1>Products Catalog</h1>
+                <p className="subtext" style={{ marginTop: '2px' }}>
+                  Total Catalog Count: <strong>{totalCount}</strong> product{totalCount !== 1 ? 's' : ''}
+                </p>
+              </div>
               <button className="primary-btn" onClick={() => setShowAddModal(true)}>+ Add Product</button>
             </div>
 
-            <div className="filter-bar">
-              <input 
-                placeholder="Search by Product Name, SKU, Category..." 
-                value={search} 
-                onChange={(e) => setSearch(e.target.value)} 
-                className="search-input" 
-              />
+            {/* FILTER CONTROL PANEL */}
+            <div className="card filter-card">
+              <div className="filter-grid">
+                {/* Search Bar */}
+                <div className="filter-item flex-2">
+                  <label>Search Products</label>
+                  <form onSubmit={handleSearchSubmit} className="search-form-group">
+                    <input 
+                      type="text"
+                      placeholder="Type Name, SKU, or Category & press Enter..." 
+                      value={search} 
+                      onChange={(e) => setSearch(e.target.value)} 
+                      className="search-input" 
+                    />
+                    <button type="submit" className="search-btn">
+                      🔍 Search
+                    </button>
+                    {appliedSearch && (
+                      <button type="button" onClick={handleClearSearch} className="clear-btn">
+                        ✕ Clear
+                      </button>
+                    )}
+                  </form>
+                </div>
+
+                {/* 
+                -- DISABLED FOR NOW --
+                <div className="filter-item">
+                  <label>Category</label>
+                  <select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}>
+                    <option value="all">All Categories</option>
+                    {categoriesList.map((cat, idx) => (
+                      <option key={idx} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="filter-item">
+                  <label>Stock Status</label>
+                  <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}>
+                    <option value="all">All Statuses</option>
+                    <option value="healthy">Healthy Stock</option>
+                    <option value="low">Low Stock</option>
+                    <option value="out-of-stock">Out of Stock</option>
+                  </select>
+                </div>
+                */}
+
+                {/* Sort By Dropdown */}
+                <div className="filter-item">
+                  <label>Sort By</label>
+                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                    <option value="name_asc">Name (A - Z)</option>
+                    <option value="name_desc">Name (Z - A)</option>
+                    <option value="price_asc">Price (Low to High)</option>
+                    <option value="price_desc">Price (High to Low)</option>
+                    <option value="stock_asc">Stock (Low to High)</option>
+                    <option value="stock_desc">Stock (High to Low)</option>
+                  </select>
+                </div>
+              </div>
             </div>
 
+<<<<<<< HEAD
             <div className="table-wrapper">
               <table>
                 <thead>
@@ -483,10 +626,89 @@ export default function ProductsPage() {
                   ))}
                 </tbody>
               </table>
+=======
+            {/* PRODUCTS TABLE WITH SERVER-SIDE PAGINATION */}
+            <div className="table-wrapper card" style={{ marginTop: '16px' }}>
+              {loading ? (
+                <p className="loading-text">Loading catalog from database...</p>
+              ) : products.length === 0 ? (
+                <p className="empty-text">No products match the selected criteria.</p>
+              ) : (
+                <>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>SKU</th>
+                        <th>Product Name</th>
+                        <th>Category</th>
+                        <th>Selling Price</th>
+                        <th>Available Stock</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.map(p => (
+                        <tr key={p.id} className="clickable-row" onClick={() => setSelectedProduct(p)}>
+                          <td><strong>{p.sku}</strong></td>
+                          <td>{p.name}</td>
+                          <td>{p.category_name}</td>
+                          <td>₹{Number(p.selling_price).toLocaleString()}</td>
+                          <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
+                          <td>
+                            <span className={`status-tag ${(p.status || '').toLowerCase().replace(/\s+/g, '-')}`}>
+                              {p.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* SERVER-SIDE PAGINATION BAR */}
+                  <div className="pagination-bar">
+                    <div className="pagination-info">
+                      <span>Show:</span>
+                      <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} className="page-size-select">
+                        <option value={10}>10 per page</option>
+                        <option value={25}>25 per page</option>
+                        <option value={50}>50 per page</option>
+                        <option value={100}>100 per page</option>
+                      </select>
+                      <span>
+                        Showing <strong>{((currentPage - 1) * pageSize) + 1}</strong> - <strong>{Math.min(currentPage * pageSize, totalCount)}</strong> of <strong>{totalCount}</strong>
+                      </span>
+                    </div>
+
+                    <div className="pagination-controls">
+                      <button 
+                        disabled={currentPage === 1} 
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        className="page-btn"
+                      >
+                        ◀ Previous
+                      </button>
+
+                      <span className="page-indicator">
+                        Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
+                      </span>
+
+                      <button 
+                        disabled={currentPage >= totalPages} 
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        className="page-btn"
+                      >
+                        Next ▶
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+>>>>>>> n1.0
             </div>
           </>
         )}
 
+        {/* MODALS */}
         {showAddModal && (
           <div className="modal-overlay">
             <div className="modal">
@@ -686,13 +908,38 @@ export default function ProductsPage() {
       <style jsx>{`
         .layout { display: flex; min-height: 100vh; background: #f8fafc; }
         .content { flex: 1; padding: 24px; box-sizing: border-box; }
+<<<<<<< HEAD
         @media (max-width: 768px) { .content { padding: 16px; padding-bottom: 90px; } }
+=======
+
+        @media (max-width: 768px) {
+          .content { padding: 16px; padding-bottom: 90px; }
+        }
+
+>>>>>>> n1.0
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .primary-btn, .action-btn { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
         .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
         .btn-group { display: flex; gap: 10px; }
-        .filter-bar { margin-bottom: 16px; }
-        .search-input { width: 100%; max-width: 400px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
+
+        .filter-card { background: #ffffff; margin-bottom: 16px; }
+        .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+        .filter-item { display: flex; flex-direction: column; gap: 4px; }
+        .filter-item.flex-2 { grid-column: span 2; }
+        @media (max-width: 640px) {
+          .filter-item.flex-2 { grid-column: span 1; }
+        }
+        .filter-item label { font-size: 12px; font-weight: 600; color: #475569; }
+        .filter-item select { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; }
+
+        .search-form-group { display: flex; gap: 8px; align-items: center; width: 100%; }
+        .search-input { flex: 1; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; box-sizing: border-box; }
+        .search-input:focus { outline: none; border-color: #0f172a; }
+        .search-btn { background: #0f172a; color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 13px; white-space: nowrap; }
+        .clear-btn { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+        .clear-btn:hover { background: #e2e8f0; }
+
+        .loading-text, .empty-text { text-align: center; color: #64748b; padding: 40px 0; }
         .table-wrapper { background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
         th, td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; }
@@ -700,10 +947,27 @@ export default function ProductsPage() {
         .clickable-row { cursor: pointer; transition: background 0.15s; }
         .clickable-row:hover { background: #f8fafc; }
         .subtext { font-size: 12px; color: #94a3b8; }
+<<<<<<< HEAD
         .status-tag { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
         .status-tag.healthy { background: #dcfce7; color: #15803d; }
         .status-tag.low { background: #fef9c3; color: #a16207; }
         .status-tag.out-of-stock { background: #fee2e2; color: #b91c1c; }
+=======
+        
+        .status-tag { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+        .status-tag.healthy { background: #dcfce7; color: #15803d; }
+        .status-tag.low { background: #fef9c3; color: #a16207; }
+        .status-tag.out-of-stock { background: #fee2e2; color: #b91c1c; }
+
+        .pagination-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-top: 1px solid #e2e8f0; background: #fff; font-size: 13px; flex-wrap: wrap; gap: 10px; }
+        .pagination-info { display: flex; align-items: center; gap: 10px; color: #475569; }
+        .page-size-select { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
+        .pagination-controls { display: flex; align-items: center; gap: 12px; }
+        .page-btn { padding: 6px 12px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 12px; }
+        .page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .page-indicator { color: #475569; }
+
+>>>>>>> n1.0
         .back-btn { background: none; border: none; color: #0284c7; cursor: pointer; margin-bottom: 12px; font-size: 14px; padding: 0; }
         .header-card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; }
         .header-main { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
