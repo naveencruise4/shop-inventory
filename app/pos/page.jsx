@@ -46,6 +46,7 @@ export default function POSPage() {
   const dropdownRef = useRef(null);
   const customerDropdownRef = useRef(null);
   const salesmanDropdownRef = useRef(null);
+  const cartScrollRef = useRef(null); // Enhancement 1: Ref for auto-scrolling cart box
 
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [amountPaid, setAmountPaid] = useState('');
@@ -69,6 +70,13 @@ export default function POSPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Enhancement 1: Auto-scroll cart box to bottom when items are added or updated
+  useEffect(() => {
+    if (cartScrollRef.current) {
+      cartScrollRef.current.scrollTop = cartScrollRef.current.scrollHeight;
+    }
+  }, [cart]);
 
   const fetchSalesman = async () => {
     const { data } = await supabase.from('salesman').select('*');
@@ -103,7 +111,7 @@ export default function POSPage() {
         .select('*')
         .eq('shop_id', currentShopId)
         .order('name', { ascending: true })
-        .limit(12);
+        .limit(30);
 
       if (initialProds) setProducts(initialProds);
       fetchPendingPreOrders(currentShopId);
@@ -238,20 +246,24 @@ export default function POSPage() {
 
     const hasGst = product.has_gst ?? false;
     const gstPct = Number(product.gst_percentage || 0);
+    const unitType = product.unit || product.unit_name || 'Nos';
+    const defaultQty = 1;
 
     const existingIndex = cart.findIndex(item => item.id === product.id);
     if (existingIndex > -1) {
       const updatedCart = [...cart];
-      if (!convertingPreOrder && updatedCart[existingIndex].quantity + 1 > product.available_stock) {
+      const nextQty = updatedCart[existingIndex].quantity + defaultQty;
+      if (!convertingPreOrder && nextQty > product.available_stock) {
         alert(`Cannot add more. Only ${product.available_stock} units available.`);
         return;
       }
-      updatedCart[existingIndex].quantity += 1;
+      updatedCart[existingIndex].quantity = nextQty;
       setCart(updatedCart);
     } else {
       setCart([...cart, {
         ...product,
-        quantity: 1,
+        quantity: defaultQty,
+        unit: unitType,
         originalPrice: product.selling_price,
         price: product.selling_price,
         has_gst: hasGst,
@@ -263,10 +275,14 @@ export default function POSPage() {
     setShowDropdown(false);
   };
 
+  // Enhancement 2: Quantity handling for Kgs vs Nos
   const updateCartQuantity = (id, delta) => {
     setCart(cart.map(item => {
       if (item.id === id) {
-        const newQty = item.quantity + delta;
+        const isKgs = item.unit?.toLowerCase().includes('kg');
+        const step = isKgs ? 0.5 : 1;
+        const newQty = Number((item.quantity + (delta * step)).toFixed(3));
+
         if (!convertingPreOrder && newQty > item.available_stock) {
           alert(`Only ${item.available_stock} units available in stock.`);
           return item;
@@ -275,6 +291,21 @@ export default function POSPage() {
       }
       return item;
     }).filter(Boolean));
+  };
+
+  const handleCartQuantityInput = (id, val) => {
+    const parsed = parseFloat(val);
+    setCart(cart.map(item => {
+      if (item.id === id) {
+        const newQty = isNaN(parsed) ? 0 : parsed;
+        if (!convertingPreOrder && newQty > item.available_stock) {
+          alert(`Only ${item.available_stock} units available in stock.`);
+          return { ...item, quantity: Number(item.available_stock) };
+        }
+        return { ...item, quantity: newQty };
+      }
+      return item;
+    }));
   };
 
   const handleItemPriceChange = (id, newPriceVal) => {
@@ -341,6 +372,7 @@ export default function POSPage() {
       id: si.product_id,
       sku: si.sku,
       name: si.name || si.sku,
+      unit: si.unit || 'Nos',
       quantity: si.quantity,
       price: si.unit_price,
       originalPrice: si.unit_price,
@@ -352,7 +384,6 @@ export default function POSPage() {
     setCart(loadedItems);
     setCustomGrandTotal(po.total_amount);
     
-    // Automatically default amount paid to clear remaining balance
     const balance = po.total_amount - (po.paid_amount || 0);
     setAmountPaid(balance > 0 ? balance.toString() : '0');
     setOrderType('sale');
@@ -362,13 +393,11 @@ export default function POSPage() {
   const handleCheckout = async () => {
     if (cart.length === 0) return;
 
-    // Requirement 1: For immediate sale, amount paid cannot be empty — prompt user to enter it.
     if (orderType === 'sale' && !convertingPreOrder && amountPaid === '') {
       alert('⚠️ Please enter the amount paid by the customer.');
       return;
     }
 
-    // Requirement 2: If nothing entered for pre-orders, default to 0 advance paid.
     const enteredPaid = amountPaid !== '' ? Number(amountPaid) : 0;
 
     if (orderType === 'sale' && !convertingPreOrder && Math.abs(enteredPaid - finalTotal) > 0.01) {
@@ -386,7 +415,6 @@ export default function POSPage() {
       let createdGstOrder = null;
       let createdEstimateOrder = null;
 
-      // Single invoice batch mode
       if (billingMode === 'estimate_only' || billingMode === 'gst_only' || orderType === 'pre_order') {
         const isGstBatch = billingMode === 'gst_only' || (convertingPreOrder ? convertingPreOrder.invoice_type === 'gst' : true);
         const { totalBase, totalGst } = calculateTotalGSTBreakdown(cart);
@@ -401,6 +429,7 @@ export default function POSPage() {
             product_id: item.id,
             sku: item.sku,
             name: item.name,
+            unit: item.unit,
             quantity: item.quantity,
             price: item.price,
             unit_price: item.price,
@@ -455,7 +484,6 @@ export default function POSPage() {
         else createdEstimateOrder = singleOrderResult;
 
       } else {
-        // AUTO-SPLIT MODE: Separate GST and Estimate items cleanly with proportional payment allocation
         let gstCartItems = [];
         let estimateCartItems = [];
 
@@ -495,6 +523,7 @@ export default function POSPage() {
               product_id: item.id,
               sku: item.sku,
               name: item.name,
+              unit: item.unit,
               quantity: item.quantity,
               price: item.price,
               unit_price: item.price,
@@ -644,7 +673,7 @@ export default function POSPage() {
                           <div className="dropdown-right">
                             <span className="price">₹{p.selling_price}</span>
                             <span className={`stock-badge ${p.available_stock > 0 ? 'green' : 'red'}`}>
-                              Available: {p.available_stock}
+                              Available: {p.available_stock} {p.unit || 'Nos'}
                             </span>
                           </div>
                         </div>
@@ -656,18 +685,22 @@ export default function POSPage() {
                 )}
               </div>
 
-              <h4>Quick Catalog</h4>
+              {/* Enhancement 3: Quick Catalog showing only products with stock > 0 */}
+              <h4>Quick Catalog (In-Stock)</h4>
               <div className="quick-grid">
-                {products.slice(0, 8).map(p => (
-                  <button key={p.id} className="quick-tile" onClick={() => addToCart(p)}>
-                    <span className="tile-name">{p.name}</span>
-                    <span className="tile-price">₹{p.selling_price}</span>
-                    <span className="tile-stock">Available: {p.available_stock}</span>
-                    <span className={`tile-tax ${p.has_gst && Number(p.gst_percentage || 0) > 0 ? 'gst' : 'estimate'}`}>
-                      {p.has_gst && Number(p.gst_percentage || 0) > 0 ? `GST ${p.gst_percentage}%` : 'Estimate'}
-                    </span>
-                  </button>
-                ))}
+                {products
+                  .filter(p => Number(p.available_stock || 0) > 0)
+                  .slice(0, 8)
+                  .map(p => (
+                    <button key={p.id} className="quick-tile" onClick={() => addToCart(p)}>
+                      <span className="tile-name">{p.name}</span>
+                      <span className="tile-price">₹{p.selling_price}</span>
+                      <span className="tile-stock">Stock: {p.available_stock} {p.unit || 'Nos'}</span>
+                      <span className={`tile-tax ${p.has_gst && Number(p.gst_percentage || 0) > 0 ? 'gst' : 'estimate'}`}>
+                        {p.has_gst && Number(p.gst_percentage || 0) > 0 ? `GST ${p.gst_percentage}%` : 'Estimate'}
+                      </span>
+                    </button>
+                  ))}
               </div>
             </div>
           </div>
@@ -784,7 +817,8 @@ export default function POSPage() {
                 </div>
               </div>
 
-              <div className="cart-items-wrapper">
+              {/* Enhancement 1: Cart Items Wrapper attached with cartScrollRef */}
+              <div className="cart-items-wrapper" ref={cartScrollRef}>
                 {cart.length === 0 ? (
                   <p className="empty-cart-text">Cart is empty. Search or click products to add.</p>
                 ) : (
@@ -799,43 +833,53 @@ export default function POSPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {cart.map(item => (
-                        <tr key={item.id}>
-                          <td>
-                            <strong>{item.name}</strong><br/>
-                            <span className="subtext">{item.sku}</span>
-                            <div style={{ marginTop: '2px' }}>
-                              {convertingPreOrder && (
-                                <span className="cart-est-badge" style={{ background: '#e0f2fe', color: '#0369a1', marginRight: '4px' }}>
-                                  Pre-booked
-                                </span>
-                              )}
-                              {item.has_gst && Number(item.gst_percentage || 0) > 0 ? (
-                                <span className="cart-gst-badge">GST {item.gst_percentage}%</span>
-                              ) : (
-                                <span className="cart-est-badge">Estimate / Non-GST</span>
-                              )}
-                            </div>
-                          </td>
-                          <td>
-                            <div className="qty-controls">
-                              <button onClick={() => updateCartQuantity(item.id, -1)}>-</button>
-                              <span>{item.quantity}</span>
-                              <button onClick={() => updateCartQuantity(item.id, 1)}>+</button>
-                            </div>
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              value={item.price}
-                              onChange={(e) => handleItemPriceChange(item.id, e.target.value)}
-                              className="table-price-input"
-                            />
-                          </td>
-                          <td>₹{(item.price * item.quantity).toFixed(2)}</td>
-                          <td><button className="remove-btn" onClick={() => removeFromCart(item.id)}>✕</button></td>
-                        </tr>
-                      ))}
+                      {cart.map(item => {
+                        const isKgs = item.unit?.toLowerCase().includes('kg');
+                        return (
+                          <tr key={item.id}>
+                            <td>
+                              <strong>{item.name}</strong><br/>
+                              <span className="subtext">{item.sku} ({item.unit || 'Nos'})</span>
+                              <div style={{ marginTop: '2px' }}>
+                                {convertingPreOrder && (
+                                  <span className="cart-est-badge" style={{ background: '#e0f2fe', color: '#0369a1', marginRight: '4px' }}>
+                                    Pre-booked
+                                  </span>
+                                )}
+                                {item.has_gst && Number(item.gst_percentage || 0) > 0 ? (
+                                  <span className="cart-gst-badge">GST {item.gst_percentage}%</span>
+                                ) : (
+                                  <span className="cart-est-badge">Estimate / Non-GST</span>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              {/* Enhancement 2: Quantity controls supporting decimal input for Kgs */}
+                              <div className="qty-controls">
+                                <button onClick={() => updateCartQuantity(item.id, -1)}>-</button>
+                                <input
+                                  type="number"
+                                  step={isKgs ? "0.001" : "1"}
+                                  value={item.quantity}
+                                  onChange={(e) => handleCartQuantityInput(item.id, e.target.value)}
+                                  className="table-qty-input"
+                                />
+                                <button onClick={() => updateCartQuantity(item.id, 1)}>+</button>
+                              </div>
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                value={item.price}
+                                onChange={(e) => handleItemPriceChange(item.id, e.target.value)}
+                                className="table-price-input"
+                              />
+                            </td>
+                            <td>₹{(item.price * item.quantity).toFixed(2)}</td>
+                            <td><button className="remove-btn" onClick={() => removeFromCart(item.id)}>✕</button></td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -1047,13 +1091,15 @@ export default function POSPage() {
         .select-section label { font-size: 12px; color: #64748b; font-weight: 600; display: block; margin-bottom: 4px; }
         .customer-input-row { display: flex; position: relative; }
         .clear-cust-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #64748b; cursor: pointer; }
-        .cart-items-wrapper { min-height: 180px; max-height: 280px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; }
+        
+        .cart-items-wrapper { min-height: 180px; max-height: 280px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; scroll-behavior: smooth; }
         .cart-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .cart-table th { background: #f1f5f9; padding: 8px; text-align: left; }
+        .cart-table th { background: #f1f5f9; padding: 8px; text-align: left; position: sticky; top: 0; z-index: 5; }
         .cart-table td { padding: 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
-        .qty-controls { display: flex; align-items: center; gap: 6px; }
-        .qty-controls button { background: #e2e8f0; border: none; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; }
-        .table-price-input { width: 80px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; }
+        .qty-controls { display: flex; align-items: center; gap: 4px; }
+        .qty-controls button { background: #e2e8f0; border: none; width: 22px; height: 24px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .table-qty-input { width: 50px; padding: 4px 2px; border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; font-size: 12px; }
+        .table-price-input { width: 75px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; }
         .remove-btn { background: none; border: none; color: #ef4444; cursor: pointer; font-weight: bold; }
         .cart-summary { border-top: 1px solid #e2e8f0; padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
         .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #64748b; }
@@ -1066,7 +1112,6 @@ export default function POSPage() {
         .segmented-control button { flex: 1; padding: 8px; border: none; background: transparent; font-size: 12px; font-weight: 600; color: #64748b; border-radius: 4px; cursor: pointer; }
         .segmented-control button.active { background: white; color: #0f172a; }
 
-        /* Pre-Order Summary Card Styling */
         .preorder-ledger-card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
         .text-blue { color: #0284c7; font-weight: 600; }
         .text-red { color: #dc2626; }
