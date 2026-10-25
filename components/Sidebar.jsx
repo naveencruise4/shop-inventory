@@ -9,6 +9,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [shopName, setShopName] = useState('InventoryApp');
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   useEffect(() => {
     fetchShopName();
@@ -42,11 +43,11 @@ export default function Sidebar() {
   };
 
   const navItems = [
-    { label: 'Dashboard', icon: '📊', href: '/dashboard' },
+  //  { label: 'Dashboard', icon: '📊', href: '/dashboard' },
     { label: 'POS', icon: '🛒', href: '/pos' },
     { label: 'Products', icon: '📦', href: '/products' },
     { label: 'Orders', icon: '📋', href: '/orders' },
-    { label: 'Ledger', icon: '📒', href: '/ledger' },
+    { label: 'Ledger', icon: '📖', href: '/ledger' },
     { label: 'Settings', icon: '⚙️', href: '/settings' },
   ];
 
@@ -57,74 +58,116 @@ export default function Sidebar() {
 
   return (
     <>
-      <aside className="sidebar">
+      <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
         <div>
-          <div className="logo" title={shopName}>{shopName}</div>
+          <div className="sidebar-top-row">
+            {!isCollapsed && <div className="logo" title={shopName}>{shopName}</div>}
+            <button 
+              onClick={() => setIsCollapsed(!isCollapsed)} 
+              className="collapse-btn" 
+              title={isCollapsed ? "Expand Sidebar" : "Minimize Sidebar"}
+            >
+              {isCollapsed ? '➡' : '⬅'}
+            </button>
+          </div>
+          
           <nav>
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
                 className={`nav-item ${pathname === item.href ? 'active' : ''}`}
+                title={isCollapsed ? item.label : ''}
               >
                 <span className="nav-icon">{item.icon}</span>
-                <span className="nav-label">{item.label}</span>
+                {!isCollapsed && <span className="nav-label">{item.label}</span>}
               </Link>
             ))}
           </nav>
         </div>
         
         <div className="logout-section">
-          <button onClick={handleLogout} className="logout-btn">
-            Log Out
+          <button onClick={handleLogout} className="logout-btn" title="Log Out">
+            {isCollapsed ? '🚪' : 'Log Out'}
           </button>
         </div>
       </aside>
 
       <style jsx>{`
         .sidebar {
-          width: 220px;
-          min-height: 100vh;
+          width: ${isCollapsed ? '76px' : '220px'};
+          position: sticky;
+          top: 0;
+          height: 100vh;
           background: #0f172a;
           color: #fff;
-          padding: 20px;
+          padding: 20px 14px;
           box-sizing: border-box;
           flex-shrink: 0;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
+          transition: width 0.25s ease;
+          z-index: 100;
+          overflow-y: auto;
+        }
+
+        .sidebar-top-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 24px;
+          gap: 8px;
         }
 
         .logo {
-          font-size: 16px;
+          font-size: 15px;
           font-weight: bold;
-          margin-bottom: 30px;
           color: #38bdf8;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
 
+        .collapse-btn {
+          background: #1e293b;
+          color: #94a3b8;
+          border: 1px solid #334155;
+          padding: 6px 8px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 12px;
+          transition: background 0.2s, color 0.2s;
+        }
+
+        .collapse-btn:hover {
+          background: #334155;
+          color: #fff;
+        }
+
         nav {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 6px;
         }
 
         :global(.nav-item) {
           color: #94a3b8;
           text-decoration: none;
-          padding: 10px 14px;
+          padding: 10px 12px;
           border-radius: 6px;
           font-size: 14px;
           transition: background 0.2s, color 0.2s;
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 12px;
+          white-space: nowrap;
         }
 
         .nav-icon {
           font-size: 16px;
+          min-width: 20px;
+          text-align: center;
         }
 
         :global(.nav-item:hover),
@@ -134,7 +177,7 @@ export default function Sidebar() {
         }
 
         .logout-section {
-          padding-top: 20px;
+          padding-top: 16px;
           border-top: 1px solid #334155;
         }
 
@@ -149,6 +192,9 @@ export default function Sidebar() {
           font-weight: bold;
           font-size: 14px;
           transition: background 0.2s;
+          white-space: nowrap;
+          overflow: hidden;
+          text-align: center;
         }
 
         .logout-btn:hover {
@@ -161,7 +207,7 @@ export default function Sidebar() {
             position: fixed;
             bottom: 0;
             left: 0;
-            width: 100%;
+            width: 100% !important;
             height: 65px;
             min-height: auto;
             flex-direction: row;
@@ -171,9 +217,10 @@ export default function Sidebar() {
             z-index: 1000;
             border-top: 1px solid #334155;
             box-shadow: 0 -4px 10px rgba(0,0,0,0.1);
+            overflow-y: visible;
           }
 
-          .logo, .logout-section {
+          .sidebar-top-row, .logout-section {
             display: none; /* Hidden on mobile to keep bottom bar compact */
           }
 

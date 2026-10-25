@@ -2,8 +2,9 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from '@/components/Sidebar';
+import PrintableReceiptModal from '@/components/PrintableReceiptModal';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function POSPage() {
@@ -11,7 +12,7 @@ export default function POSPage() {
   const [customers, setCustomers] = useState([]);
   const [shopInfo, setShopInfo] = useState({ id: null, name: 'My Shop' });
   const [isSearchingProducts, setIsSearchingProducts] = useState(false);
-  
+
   // Selected Customer State
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -25,26 +26,35 @@ export default function POSPage() {
   const [salesmanSearch, setSalesmanSearch] = useState('');
   const [showSalesmanDropdown, setShowSalesmanDropdown] = useState(false);
 
+  // Order Options
+  const [orderType, setOrderType] = useState('sale'); // 'sale' | 'pre_order'
+  const [billingMode, setBillingMode] = useState('auto_split');
+
+  // Pre-Order Conversion & Internal Search State
+  const [pendingPreOrders, setPendingPreOrders] = useState([]);
+  const [preOrderSearch, setPreOrderSearch] = useState('');
+  const [showPreOrderModal, setShowPreOrderModal] = useState(false);
+  const [convertingPreOrder, setConvertingPreOrder] = useState(null);
+
   // POS Cart State
   const [cart, setCart] = useState([]);
   const [customGrandTotal, setCustomGrandTotal] = useState('');
-  
-  // Search & Dropdown State
   const [searchTerm, setSearchTerm] = useState('');
   const [appliedProductSearch, setAppliedProductSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
-  
+
   const dropdownRef = useRef(null);
   const customerDropdownRef = useRef(null);
   const salesmanDropdownRef = useRef(null);
-  
+
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [amountPaid, setAmountPaid] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [saleStatus, setSaleStatus] = useState('completed');
 
-  // Print Receipt State
-  const [completedOrder, setCompletedOrder] = useState(null);
+  // Printable Receipt State
+  const [completedGstOrder, setCompletedGstOrder] = useState(null);
+  const [completedEstimateOrder, setCompletedEstimateOrder] = useState(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
 
   useEffect(() => {
@@ -52,15 +62,9 @@ export default function POSPage() {
     fetchSalesman();
 
     const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setShowDropdown(false);
-      }
-      if (customerDropdownRef.current && !customerDropdownRef.current.contains(e.target)) {
-        setShowCustomerDropdown(false);
-      }
-      if (salesmanDropdownRef.current && !salesmanDropdownRef.current.contains(e.target)) {
-        setShowSalesmanDropdown(false);
-      }
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setShowDropdown(false);
+      if (customerDropdownRef.current && !customerDropdownRef.current.contains(e.target)) setShowCustomerDropdown(false);
+      if (salesmanDropdownRef.current && !salesmanDropdownRef.current.contains(e.target)) setShowSalesmanDropdown(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -94,7 +98,6 @@ export default function POSPage() {
     }
 
     if (currentShopId) {
-      // Load initial quick catalog items (First 12 products)
       const { data: initialProds } = await supabase
         .from('vw_product_stock')
         .select('*')
@@ -103,17 +106,26 @@ export default function POSPage() {
         .limit(12);
 
       if (initialProds) setProducts(initialProds);
+      fetchPendingPreOrders(currentShopId);
     }
   };
 
-  // Explicit Product Search Form Submit
+  const fetchPendingPreOrders = async (sid) => {
+    const { data } = await supabase
+      .from('sales')
+      .select('*, customers(name, phone), sale_items(*)')
+      .eq('shop_id', sid)
+      .eq('sale_status', 'pre_order')
+      .order('created_at', { ascending: false });
+
+    if (data) setPendingPreOrders(data);
+  };
+
   const handleProductSearchSubmit = (e) => {
     if (e) e.preventDefault();
     const queryTerm = searchTerm.trim();
     setAppliedProductSearch(queryTerm);
-    if (queryTerm) {
-      performProductSearch(queryTerm);
-    }
+    if (queryTerm) performProductSearch(queryTerm);
   };
 
   const performProductSearch = async (term) => {
@@ -134,12 +146,8 @@ export default function POSPage() {
       if (data && data.length > 0) {
         setProducts(data);
         setShowDropdown(true);
-
-        // If exact 1 SKU or barcode match, automatically add to cart
         const exactSkuMatch = data.find(p => p.sku?.toLowerCase() === term.toLowerCase());
-        if (data.length === 1 || exactSkuMatch) {
-          addToCart(exactSkuMatch || data[0]);
-        }
+        if (data.length === 1 || exactSkuMatch) addToCart(exactSkuMatch || data[0]);
       } else {
         setProducts([]);
         setShowDropdown(true);
@@ -166,6 +174,41 @@ export default function POSPage() {
   const filteredSalesman = salesman.filter(s =>
     s.name?.toLowerCase().includes(salesmanSearch.toLowerCase())
   );
+
+  const filteredPreOrders = pendingPreOrders.filter(po => {
+    const q = preOrderSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      po.id.toLowerCase().includes(q) ||
+      po.customers?.name?.toLowerCase().includes(q) ||
+      po.customers?.phone?.includes(q)
+    );
+  });
+
+  const handleCreateCustomer = async (e) => {
+    e.preventDefault();
+    if (!shopInfo.id) return;
+
+    const { data: newCustomerData, error } = await supabase.from('customers').insert([{
+      shop_id: shopInfo.id,
+      name: newCust.name,
+      phone: newCust.phone,
+      email: newCust.email
+    }]).select().single();
+
+    if (error) {
+      alert(`Failed to create customer: ${error.message}`);
+      return;
+    }
+
+    const { data: custs } = await supabase.from('customers').select('*');
+    if (custs) setCustomers(custs);
+
+    setSelectedCustomer(newCustomerData);
+    setCustomerSearch(`${newCustomerData.name} (${newCustomerData.phone})`);
+    setShowNewCustomerModal(false);
+    setNewCust({ name: '', phone: '', email: '' });
+  };
 
   const handleCreateSalesman = async () => {
     if (!salesmanSearch.trim() || !shopInfo.id) return;
@@ -199,8 +242,7 @@ export default function POSPage() {
     const existingIndex = cart.findIndex(item => item.id === product.id);
     if (existingIndex > -1) {
       const updatedCart = [...cart];
-      const currentQty = updatedCart[existingIndex].quantity;
-      if (currentQty + 1 > product.available_stock) {
+      if (!convertingPreOrder && updatedCart[existingIndex].quantity + 1 > product.available_stock) {
         alert(`Cannot add more. Only ${product.available_stock} units available.`);
         return;
       }
@@ -225,7 +267,7 @@ export default function POSPage() {
     setCart(cart.map(item => {
       if (item.id === id) {
         const newQty = item.quantity + delta;
-        if (newQty > item.available_stock) {
+        if (!convertingPreOrder && newQty > item.available_stock) {
           alert(`Only ${item.available_stock} units available in stock.`);
           return item;
         }
@@ -246,27 +288,21 @@ export default function POSPage() {
     setCustomGrandTotal('');
   };
 
-  const calculateOriginalSubtotal = () => {
-    return cart.reduce((sum, item) => sum + (Number(item.originalPrice) * Number(item.quantity)), 0);
-  };
+  const calculateOriginalSubtotal = () => cart.reduce((sum, item) => sum + (Number(item.originalPrice) * Number(item.quantity)), 0);
+  const calculateCurrentSubtotal = () => cart.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
 
-  const calculateCurrentSubtotal = () => {
-    return cart.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
-  };
-
-  const calculateTotalGSTBreakdown = () => {
+  const calculateTotalGSTBreakdown = (itemList = cart) => {
     let totalBase = 0;
     let totalGst = 0;
 
-    cart.forEach(item => {
+    itemList.forEach(item => {
       const itemInclusiveTotal = item.price * item.quantity;
       const pct = Number(item.gst_percentage || 0);
 
       if (item.has_gst && pct > 0) {
         const base = itemInclusiveTotal / (1 + pct / 100);
-        const gst = itemInclusiveTotal - base;
         totalBase += base;
-        totalGst += gst;
+        totalGst += itemInclusiveTotal - base;
       } else {
         totalBase += itemInclusiveTotal;
       }
@@ -275,171 +311,281 @@ export default function POSPage() {
     return { totalBase, totalGst };
   };
 
-  const handleCustomTotalChange = (val) => {
-    setCustomGrandTotal(val);
-    const newTotal = Number(val);
-    const currentSub = calculateCurrentSubtotal();
-
-    if (!isNaN(newTotal) && newTotal > 0 && currentSub > 0) {
-      const ratio = newTotal / currentSub;
-      setCart(cart.map(item => ({
-        ...item,
-        price: Number((item.price * ratio).toFixed(2))
-      })));
-    }
-  };
-
   const getFinalTotal = () => {
     const custom = Number(customGrandTotal);
     return (!isNaN(custom) && custom > 0) ? custom : calculateCurrentSubtotal();
   };
 
-  const handleCreateCustomer = async (e) => {
-    e.preventDefault();
-    if (!shopInfo.id) {
-      alert('Error: No active shop found.');
-      return;
-    }
+  // Pre-Order Calculations
+  const finalTotal = getFinalTotal();
+  const alreadyPaidAdvance = convertingPreOrder ? Number(convertingPreOrder.paid_amount || 0) : 0;
+  const netOutstandingDue = Math.max(0, finalTotal - alreadyPaidAdvance);
+  const todayPaidInput = amountPaid !== '' ? Number(amountPaid) : 0;
+  const remainingBalanceAfterToday = Math.max(0, netOutstandingDue - todayPaidInput);
 
-    const { data: newCustomerData, error } = await supabase.from('customers').insert([{
-      shop_id: shopInfo.id,
-      name: newCust.name,
-      phone: newCust.phone,
-      email: newCust.email
-    }]).select().single();
+  const handleCancelPreOrderConversion = () => {
+    setConvertingPreOrder(null);
+    setCart([]);
+    setCustomGrandTotal('');
+    setAmountPaid('');
+    setSelectedCustomer(null);
+    setCustomerSearch('');
+  };
 
-    if (error) {
-      alert(`Failed to create customer: ${error.message}`);
-      return;
-    }
+  const handleLoadPreOrderForConversion = (po) => {
+    setConvertingPreOrder(po);
+    setSelectedCustomer(po.customers ? { id: po.customer_id, name: po.customers.name, phone: po.customers.phone } : null);
+    if (po.customers) setCustomerSearch(`${po.customers.name} (${po.customers.phone || ''})`);
 
-    const { data: custs } = await supabase.from('customers').select('*');
-    if (custs) setCustomers(custs);
+    const loadedItems = po.sale_items.map(si => ({
+      id: si.product_id,
+      sku: si.sku,
+      name: si.name || si.sku,
+      quantity: si.quantity,
+      price: si.unit_price,
+      originalPrice: si.unit_price,
+      has_gst: si.has_gst,
+      gst_percentage: si.gst_percentage,
+      available_stock: 9999
+    }));
 
-    setSelectedCustomer(newCustomerData);
-    setCustomerSearch(`${newCustomerData.name} (${newCustomerData.phone})`);
-    setShowNewCustomerModal(false);
-    setNewCust({ name: '', phone: '', email: '' });
+    setCart(loadedItems);
+    setCustomGrandTotal(po.total_amount);
+    
+    // Automatically default amount paid to clear remaining balance
+    const balance = po.total_amount - (po.paid_amount || 0);
+    setAmountPaid(balance > 0 ? balance.toString() : '0');
+    setOrderType('sale');
+    setShowPreOrderModal(false);
   };
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
+
+    // Requirement 1: For immediate sale, amount paid cannot be empty — prompt user to enter it.
+    if (orderType === 'sale' && !convertingPreOrder && amountPaid === '') {
+      alert('⚠️ Please enter the amount paid by the customer.');
+      return;
+    }
+
+    // Requirement 2: If nothing entered for pre-orders, default to 0 advance paid.
+    const enteredPaid = amountPaid !== '' ? Number(amountPaid) : 0;
+
+    if (orderType === 'sale' && !convertingPreOrder && Math.abs(enteredPaid - finalTotal) > 0.01) {
+      alert(
+         `⚠️ Amount Mismatch Warning!\n\nAmount Paid (₹${enteredPaid.toFixed(2)}) does not equal Final Payable Amount (₹${finalTotal.toFixed(2)}).`
+      );
+      return;
+    }
+
     setIsCheckingOut(true);
 
     try {
-      if (!shopInfo.id) {
-        alert('Error: No active shop found.');
-        setIsCheckingOut(false);
-        return;
+      if (!shopInfo.id) return;
+
+      let createdGstOrder = null;
+      let createdEstimateOrder = null;
+
+      // Single invoice batch mode
+      if (billingMode === 'estimate_only' || billingMode === 'gst_only' || orderType === 'pre_order') {
+        const isGstBatch = billingMode === 'gst_only' || (convertingPreOrder ? convertingPreOrder.invoice_type === 'gst' : true);
+        const { totalBase, totalGst } = calculateTotalGSTBreakdown(cart);
+
+        const itemsPayload = cart.map(item => {
+          const pct = Number(item.gst_percentage || 0);
+          const isTaxed = item.has_gst && pct > 0;
+          const baseUnitPrice = isTaxed ? Number((item.price / (1 + pct / 100)).toFixed(2)) : item.price;
+          const unitGstAmount = isTaxed ? Number((item.price - baseUnitPrice).toFixed(2)) : 0;
+
+          return {
+            product_id: item.id,
+            sku: item.sku,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            unit_price: item.price,
+            has_gst: isTaxed,
+            gst_percentage: pct,
+            base_price: baseUnitPrice,
+            gst_amount: unitGstAmount * item.quantity
+          };
+        });
+
+        let finalStatus = orderType === 'pre_order' ? 'pre_order' : saleStatus;
+        let totalPaidSoFar = enteredPaid;
+        if (convertingPreOrder) {
+          totalPaidSoFar = alreadyPaidAdvance + enteredPaid;
+          if (totalPaidSoFar < finalTotal) finalStatus = 'pre_order';
+          else finalStatus = 'completed';
+        }
+
+        const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
+          p_shop_id: shopInfo.id,
+          p_customer_id: selectedCustomer?.id || null,
+          p_total_amount: finalTotal,
+          p_items: itemsPayload,
+          p_amount_paid: enteredPaid,
+          p_payment_method: paymentMethod || 'cash',
+          p_sale_status: finalStatus,
+          p_salesman_id: selectedSalesman?.id || null,
+          p_invoice_type: isGstBatch ? 'gst' : 'estimate',
+          p_existing_sale_id: convertingPreOrder ? convertingPreOrder.id : null
+        });
+
+        if (rpcError) throw rpcError;
+
+        const singleOrderResult = {
+          saleId,
+          shopName: shopInfo.name,
+          date: new Date().toLocaleString(),
+          customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+          customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+          salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
+          items: itemsPayload,
+          totalAmount: finalTotal,
+          paidAmount: totalPaidSoFar,
+          paymentMethod,
+          totalBase,
+          totalGst,
+          isGstInvoice: isGstBatch,
+          saleStatus: finalStatus
+        };
+
+        if (isGstBatch) createdGstOrder = singleOrderResult;
+        else createdEstimateOrder = singleOrderResult;
+
+      } else {
+        // AUTO-SPLIT MODE: Separate GST and Estimate items cleanly with proportional payment allocation
+        let gstCartItems = [];
+        let estimateCartItems = [];
+
+        cart.forEach(item => {
+          if (item.has_gst && Number(item.gst_percentage || 0) > 0) gstCartItems.push(item);
+          else estimateCartItems.push(item);
+        });
+
+        const gstTotal = gstCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+        const estimateTotal = estimateCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+        const grandCartTotal = gstTotal + estimateTotal;
+
+        const gstRatio = grandCartTotal > 0 ? gstTotal / grandCartTotal : 0;
+        const estRatio = grandCartTotal > 0 ? estimateTotal / grandCartTotal : 0;
+
+        const totalOverallPaidSoFar = convertingPreOrder ? alreadyPaidAdvance + enteredPaid : enteredPaid;
+        const totalOverallAdvance = convertingPreOrder ? alreadyPaidAdvance : 0;
+
+        const gstPaidAllocated = Number((totalOverallPaidSoFar * gstRatio).toFixed(2));
+        const estPaidAllocated = Number((totalOverallPaidSoFar * estRatio).toFixed(2));
+
+        const gstAdvanceAllocated = Number((totalOverallAdvance * gstRatio).toFixed(2));
+        const estAdvanceAllocated = Number((totalOverallAdvance * estRatio).toFixed(2));
+
+        const submitOrderBatch = async (items, batchTotal, allocatedPaid, allocatedAdvance, isGstBatch, existingId) => {
+          if (items.length === 0) return null;
+
+          const { totalBase, totalGst } = calculateTotalGSTBreakdown(items);
+
+          const itemsPayload = items.map(item => {
+            const pct = Number(item.gst_percentage || 0);
+            const isTaxed = isGstBatch && item.has_gst && pct > 0;
+            const baseUnitPrice = isTaxed ? Number((item.price / (1 + pct / 100)).toFixed(2)) : item.price;
+            const unitGstAmount = isTaxed ? Number((item.price - baseUnitPrice).toFixed(2)) : 0;
+
+            return {
+              product_id: item.id,
+              sku: item.sku,
+              name: item.name,
+              quantity: item.quantity,
+              price: item.price,
+              unit_price: item.price,
+              has_gst: isTaxed,
+              gst_percentage: pct,
+              base_price: baseUnitPrice,
+              gst_amount: unitGstAmount * item.quantity
+            };
+          });
+
+          let finalStatus = saleStatus;
+          if (convertingPreOrder && allocatedPaid < batchTotal) finalStatus = 'pre_order';
+
+          const paymentForThisBatch = existingId ? (allocatedPaid - allocatedAdvance) : allocatedPaid;
+
+          const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
+            p_shop_id: shopInfo.id,
+            p_customer_id: selectedCustomer?.id || null,
+            p_total_amount: batchTotal,
+            p_items: itemsPayload,
+            p_amount_paid: paymentForThisBatch,
+            p_payment_method: paymentMethod || 'cash',
+            p_sale_status: finalStatus,
+            p_salesman_id: selectedSalesman?.id || null,
+            p_invoice_type: isGstBatch ? 'gst' : 'estimate',
+            p_existing_sale_id: existingId || null
+          });
+
+          if (rpcError) throw rpcError;
+
+          return {
+            saleId,
+            shopName: shopInfo.name,
+            date: new Date().toLocaleString(),
+            customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+            customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+            salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
+            items: itemsPayload,
+            totalAmount: batchTotal,
+            paidAmount: allocatedPaid,
+            paymentMethod,
+            totalBase,
+            totalGst,
+            isGstInvoice: isGstBatch,
+            saleStatus: finalStatus
+          };
+        };
+
+        if (gstCartItems.length > 0) {
+          createdGstOrder = await submitOrderBatch(
+            gstCartItems, 
+            gstTotal, 
+            gstPaidAllocated, 
+            gstAdvanceAllocated, 
+            true, 
+            convertingPreOrder ? convertingPreOrder.id : null
+          );
+        }
+
+        if (estimateCartItems.length > 0) {
+          createdEstimateOrder = await submitOrderBatch(
+            estimateCartItems, 
+            estimateTotal, 
+            estPaidAllocated, 
+            estAdvanceAllocated, 
+            false, 
+            null
+          );
+        }
       }
 
-      const finalTotal = getFinalTotal();
-      const actualPaidAmount = amountPaid !== '' ? Number(amountPaid) : finalTotal;
-      const pendingAmount = Math.max(0, finalTotal - actualPaidAmount);
-      const { totalBase, totalGst } = calculateTotalGSTBreakdown();
-
-      const itemsPayload = cart.map(item => {
-        const pct = Number(item.gst_percentage || 0);
-        const isTaxed = item.has_gst && pct > 0;
-
-        const baseUnitPrice = isTaxed 
-          ? Number((item.price / (1 + pct / 100)).toFixed(2))
-          : item.price;
-        
-        const unitGstAmount = isTaxed
-          ? Number((item.price - baseUnitPrice).toFixed(2))
-          : 0;
-
-        return {
-          product_id: item.id,
-          sku: item.sku,
-          name: item.name,
-          quantity: item.quantity,
-          price: item.price,
-          unit_price: item.price,
-          has_gst: item.has_gst,
-          gst_percentage: pct,
-          base_price: baseUnitPrice,
-          gst_amount: unitGstAmount * item.quantity
-        };
-      });
-
-      const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
-        p_shop_id: shopInfo.id,
-        p_customer_id: selectedCustomer?.id || null,
-        p_total_amount: finalTotal,
-        p_items: itemsPayload,
-        p_amount_paid: actualPaidAmount,
-        p_payment_method: paymentMethod || 'cash',
-        p_sale_status: saleStatus || 'completed',
-        p_salesman_id: selectedSalesman?.id || null
-      });
-
-      if (rpcError) throw rpcError;
-
-      setCompletedOrder({
-        saleId,
-        shopName: shopInfo.name,
-        date: new Date().toLocaleString(),
-        customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
-        customerPhone: selectedCustomer ? selectedCustomer.phone : '',
-        salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
-        items: itemsPayload,
-        totalAmount: finalTotal,
-        paidAmount: actualPaidAmount,
-        pendingAmount: pendingAmount,
-        paymentMethod,
-        totalBase,
-        totalGst
-      });
-
+      setCompletedGstOrder(createdGstOrder);
+      setCompletedEstimateOrder(createdEstimateOrder);
       setShowReceiptModal(true);
 
+      // Reset Form State
       setCart([]);
       setCustomGrandTotal('');
       setAmountPaid('');
-      setSaleStatus('completed');
+      setConvertingPreOrder(null);
+      setOrderType('sale');
       setSelectedCustomer(null);
       setCustomerSearch('');
       setSelectedSalesman(null);
       setSalesmanSearch('');
 
       fetchInitialData();
-
     } catch (err) {
       alert(`Checkout failed: ${err.message}`);
     } finally {
       setIsCheckingOut(false);
-    }
-  };
-
-  const handlePrint = () => {
-    const receiptElement = document.getElementById('printable-receipt');
-    if (!receiptElement) return;
-
-    document.getElementById('print-mount-root')?.remove();
-
-    const printContainer = document.createElement('div');
-    printContainer.id = 'print-mount-root';
-
-    const receiptClone = receiptElement.cloneNode(true);
-    receiptClone.removeAttribute('id');
-
-    printContainer.appendChild(receiptClone);
-    document.body.appendChild(printContainer);
-
-    const cleanup = () => {
-      printContainer.remove();
-      window.removeEventListener('afterprint', cleanup);
-    };
-
-    window.addEventListener('afterprint', cleanup, { once: true });
-
-    try {
-      window.print();
-    } catch (error) {
-      cleanup();
-      console.error('Unable to print receipt:', error);
     }
   };
 
@@ -451,6 +597,9 @@ export default function POSPage() {
       <main className="content">
         <div className="top-bar">
           <h1>POS Terminal</h1>
+          <button className="secondary-btn" onClick={() => setShowPreOrderModal(true)}>
+            📋 Pending Pre-Orders ({pendingPreOrders.length})
+          </button>
         </div>
 
         <div className="pos-container">
@@ -458,12 +607,11 @@ export default function POSPage() {
           <div className="pos-left">
             <div className="card">
               <h3>Find & Add Products</h3>
-              
-              {/* EXPLICIT SEARCH FORM WITH BUTTON */}
+
               <div className="search-dropdown-container" ref={dropdownRef}>
                 <form onSubmit={handleProductSearchSubmit} className="search-form-group">
-                  <input 
-                    placeholder="Scan barcode, type SKU or product name & press Enter..." 
+                  <input
+                    placeholder="Scan barcode, type SKU or product name & press Enter..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="search-input"
@@ -485,16 +633,18 @@ export default function POSPage() {
                         <div key={p.id} className="dropdown-item" onClick={() => addToCart(p)}>
                           <div>
                             <strong>{p.name}</strong> <span className="subtext">({p.sku})</span>
-                            {p.has_gst && Number(p.gst_percentage) > 0 && (
-                              <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', marginLeft: '6px', padding: '2px 4px', borderRadius: '4px' }}>
-                                GST {p.gst_percentage}%
-                              </span>
-                            )}
+                            <div className="item-tax-tag">
+                              {p.has_gst && Number(p.gst_percentage || 0) > 0 ? (
+                                <span className="gst-tag">GST {p.gst_percentage}%</span>
+                              ) : (
+                                <span className="estimate-tag">Estimate / Non-GST</span>
+                              )}
+                            </div>
                           </div>
                           <div className="dropdown-right">
                             <span className="price">₹{p.selling_price}</span>
                             <span className={`stock-badge ${p.available_stock > 0 ? 'green' : 'red'}`}>
-                              Stock: {p.available_stock}
+                              Available: {p.available_stock}
                             </span>
                           </div>
                         </div>
@@ -513,6 +663,9 @@ export default function POSPage() {
                     <span className="tile-name">{p.name}</span>
                     <span className="tile-price">₹{p.selling_price}</span>
                     <span className="tile-stock">Available: {p.available_stock}</span>
+                    <span className={`tile-tax ${p.has_gst && Number(p.gst_percentage || 0) > 0 ? 'gst' : 'estimate'}`}>
+                      {p.has_gst && Number(p.gst_percentage || 0) > 0 ? `GST ${p.gst_percentage}%` : 'Estimate'}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -522,15 +675,31 @@ export default function POSPage() {
           {/* RIGHT: Active Cart & Checkout */}
           <div className="pos-right">
             <div className="card cart-card">
-              <h3>Current Order Cart</h3>
-              
-              {/* ALIGNED 2-COLUMN FORM ROW FOR CUSTOMER & SALESMAN */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h3>{convertingPreOrder ? `Fulfilling Pre-Order (#${convertingPreOrder.id.slice(0, 8)})` : 'Current Order Cart'}</h3>
+                {convertingPreOrder && (
+                  <button className="clear-btn" onClick={handleCancelPreOrderConversion}>✕ Cancel Conversion</button>
+                )}
+              </div>
+
+              {/* Workflow Mode Selector */}
+              {!convertingPreOrder && (
+                <div className="segmented-control" style={{ marginBottom: '12px' }}>
+                  <button type="button" className={orderType === 'sale' ? 'active' : ''} onClick={() => setOrderType('sale')}>
+                    🛒 Immediate Direct Sale
+                  </button>
+                  <button type="button" className={orderType === 'pre_order' ? 'active' : ''} onClick={() => setOrderType('pre_order')}>
+                    ⏳ Pre-Order (Advance Deposit)
+                  </button>
+                </div>
+              )}
+
               <div className="pos-meta-grid">
-                {/* Customer Dropdown */}
+                {/* Customer Input */}
                 <div className="select-section" ref={customerDropdownRef}>
                   <label>Customer</label>
                   <div className="customer-input-row">
-                    <input 
+                    <input
                       placeholder="Search name or phone..."
                       value={customerSearch}
                       onChange={(e) => {
@@ -573,11 +742,11 @@ export default function POSPage() {
                   )}
                 </div>
 
-                {/* Salesman Dropdown */}
+                {/* Sales Rep Input */}
                 <div className="select-section" ref={salesmanDropdownRef}>
                   <label>Sales Rep / Lead</label>
                   <div className="customer-input-row">
-                    <input 
+                    <input
                       placeholder="Type salesman name..."
                       value={salesmanSearch}
                       onChange={(e) => {
@@ -630,55 +799,43 @@ export default function POSPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {cart.map(item => {
-                        const pct = Number(item.gst_percentage || 0);
-                        const isTaxed = item.has_gst && pct > 0;
-                        const lineTotal = item.price * item.quantity;
-                        const baseUnit = isTaxed ? (item.price / (1 + pct / 100)) : item.price;
-                        const lineGst = isTaxed ? (lineTotal - (baseUnit * item.quantity)) : 0;
-
-                        return (
-                          <tr key={item.id}>
-                            <td>
-                              <strong>{item.name}</strong><br/>
-                              <span className="subtext">{item.sku}</span>
-                              {isTaxed ? (
-                                <span style={{ display: 'block', fontSize: '10px', color: '#0369a1', marginTop: '2px' }}>
-                                  Incl. {pct}% GST (Base: ₹{baseUnit.toFixed(2)} | GST: ₹{(lineGst / item.quantity).toFixed(2)})
-                                </span>
-                              ) : (
-                                <span style={{ display: 'block', fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
-                                  Non-GST / Exempt
+                      {cart.map(item => (
+                        <tr key={item.id}>
+                          <td>
+                            <strong>{item.name}</strong><br/>
+                            <span className="subtext">{item.sku}</span>
+                            <div style={{ marginTop: '2px' }}>
+                              {convertingPreOrder && (
+                                <span className="cart-est-badge" style={{ background: '#e0f2fe', color: '#0369a1', marginRight: '4px' }}>
+                                  Pre-booked
                                 </span>
                               )}
-                            </td>
-                            <td>
-                              <div className="qty-controls">
-                                <button onClick={() => updateCartQuantity(item.id, -1)}>-</button>
-                                <span>{item.quantity}</span>
-                                <button onClick={() => updateCartQuantity(item.id, 1)}>+</button>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="price-edit-cell">
-                                <input 
-                                  type="number" 
-                                  value={item.price} 
-                                  onChange={(e) => handleItemPriceChange(item.id, e.target.value)}
-                                  className="table-price-input"
-                                />
-                                {item.price !== item.originalPrice && (
-                                  <span className="original-price-strike">₹{item.originalPrice}</span>
-                                )}
-                              </div>
-                            </td>
-                            <td>₹{lineTotal.toFixed(2)}</td>
-                            <td>
-                              <button className="remove-btn" onClick={() => removeFromCart(item.id)}>✕</button>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                              {item.has_gst && Number(item.gst_percentage || 0) > 0 ? (
+                                <span className="cart-gst-badge">GST {item.gst_percentage}%</span>
+                              ) : (
+                                <span className="cart-est-badge">Estimate / Non-GST</span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="qty-controls">
+                              <button onClick={() => updateCartQuantity(item.id, -1)}>-</button>
+                              <span>{item.quantity}</span>
+                              <button onClick={() => updateCartQuantity(item.id, 1)}>+</button>
+                            </div>
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              value={item.price}
+                              onChange={(e) => handleItemPriceChange(item.id, e.target.value)}
+                              className="table-price-input"
+                            />
+                          </td>
+                          <td>₹{(item.price * item.quantity).toFixed(2)}</td>
+                          <td><button className="remove-btn" onClick={() => removeFromCart(item.id)}>✕</button></td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 )}
@@ -686,74 +843,147 @@ export default function POSPage() {
 
               <div className="cart-summary">
                 <div className="summary-row">
-                    <span>Original Subtotal:</span>
-                    <span className="strike-text">₹{calculateOriginalSubtotal().toFixed(2)}</span>
-                </div>
-
-                {cart.length > 0 && (
-                  <div className="summary-row" style={{ fontSize: '12px', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '6px 8px', borderRadius: '4px', color: '#0369a1' }}>
-                    <span>Tax Breakdown:</span>
-                    <span>Base: ₹{totalBase.toFixed(2)} | Total GST: ₹{totalGst.toFixed(2)}</span>
-                  </div>
-                )}
-                
-                <div className="summary-row adjustment-row">
-                    <span>Override Total (₹):</span>
-                    <input 
-                      type="number" 
-                      placeholder="Enter custom total..." 
-                      value={customGrandTotal}
-                      onChange={(e) => handleCustomTotalChange(e.target.value)}
-                      className="custom-total-input"
-                    />
+                  <span>Order Generation:</span>
+                  <select value={billingMode} onChange={(e) => setBillingMode(e.target.value)} className="custom-total-input" style={{ width: '180px' }}>
+                    <option value="auto_split">Auto-Split (GST + Estimate)</option>
+                    <option value="gst_only">GST Invoice Only</option>
+                    <option value="estimate_only">Estimate / Non-GST Only</option>
+                  </select>
                 </div>
 
                 <div className="summary-row">
-                    <span>Amount Paid (₹):</span>
-                    <input 
-                      type="number" 
-                      placeholder="Leave blank for full" 
+                  <span>Tax Breakdown:</span>
+                  <span className="subtext">Base: ₹{totalBase.toFixed(2)} | GST: ₹{totalGst.toFixed(2)}</span>
+                </div>
+
+                {convertingPreOrder ? (
+                  <div className="preorder-ledger-card">
+                    <div className="summary-row">
+                      <span>Updated Cart Total:</span>
+                      <strong>₹{finalTotal.toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row text-blue">
+                      <span>Advance Received So Far:</span>
+                      <span>- ₹{alreadyPaidAdvance.toFixed(2)}</span>
+                    </div>
+                    <div className="summary-row text-red font-bold border-top-dashed">
+                      <span>Net Outstanding Due:</span>
+                      <span>₹{netOutstandingDue.toFixed(2)}</span>
+                    </div>
+
+                    <div className="summary-row" style={{ marginTop: '6px' }}>
+                      <span className="font-semibold">Today's Payment Received (₹):</span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={amountPaid}
+                        onChange={(e) => setAmountPaid(e.target.value)}
+                        className="custom-total-input pay-input"
+                      />
+                    </div>
+
+                    <div className="summary-row subtext-balance">
+                      <span>Remaining Balance After Today:</span>
+                      <span style={{ color: remainingBalanceAfterToday > 0 ? '#b91c1c' : '#15803d', fontWeight: 'bold' }}>
+                        ₹{remainingBalanceAfterToday.toFixed(2)}
+                      </span>
+                    </div>
+                    {remainingBalanceAfterToday > 0 && (
+                      <div className="balance-warning-note">
+                        ℹ️ Balance remaining. Order will stay as Pre-Order.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="summary-row">
+                    <span>{orderType === 'pre_order' ? 'Advance Payment (₹):' : 'Amount Paid (₹) *:'}</span>
+                    <input
+                      type="number"
+                      placeholder={orderType === 'pre_order' ? 'Leave blank for 0' : 'Enter amount paid...'}
                       value={amountPaid}
                       onChange={(e) => setAmountPaid(e.target.value)}
-                      className="custom-total-input"
+                      className={`custom-total-input ${orderType === 'sale' && amountPaid === '' ? 'highlight-required' : ''}`}
                     />
-                </div>
+                  </div>
+                )}
 
                 <div className="summary-row">
-                    <span>Payment Method:</span>
-                    <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="custom-total-input" style={{ width: '130px' }}>
-                      <option value="cash">Cash</option>
-                      <option value="upi">UPI</option>
-                      <option value="card">Card</option>
-                      <option value="bank_transfer">Bank Transfer</option>
-                    </select>
+                  <span>Payment Method:</span>
+                  <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="custom-total-input" style={{ width: '130px' }}>
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                    <option value="card">Card</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                  </select>
                 </div>
 
-                <div className="summary-row">
+                {!convertingPreOrder && (
+                  <div className="summary-row">
                     <span>Fulfillment Status:</span>
-                    <select value={saleStatus} onChange={(e) => setSaleStatus(e.target.value)} className="custom-total-input" style={{ width: '130px' }}>
+                    <select value={saleStatus} onChange={(e) => setSaleStatus(e.target.value)} className="custom-total-input" style={{ width: '150px' }}>
                       <option value="completed">Delivered / Completed</option>
                       <option value="pending">Pending</option>
                       <option value="processing">Processing</option>
                     </select>
-                </div>
+                  </div>
+                )}
 
                 <div className="total-row">
-                    <span>Final Payable Amount:</span>
-                    <span className="grand-total">₹{getFinalTotal().toFixed(2)}</span>
+                  <span>Final Payable Amount:</span>
+                  <span className="grand-total">₹{finalTotal.toFixed(2)}</span>
                 </div>
 
-                <button 
-                    className="checkout-btn" 
-                    disabled={cart.length === 0 || isCheckingOut}
-                    onClick={handleCheckout}
-                >
-                    {isCheckingOut ? 'Processing...' : 'Complete Sale & Checkout'}
+                <button className="checkout-btn" disabled={cart.length === 0 || isCheckingOut} onClick={handleCheckout}>
+                  {isCheckingOut ? 'Processing...' : convertingPreOrder ? 'Complete Fulfillment & Settle Balance' : orderType === 'pre_order' ? 'Save Pre-Order & Print Advance Receipt' : 'Complete Sale & Checkout'}
                 </button>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Modal: Pending Pre-Orders */}
+        {showPreOrderModal && (
+          <div className="modal-overlay">
+            <div className="modal" style={{ width: '550px' }}>
+              <h3>Pending Pre-Orders</h3>
+
+              <div style={{ marginBottom: '12px' }}>
+                <input
+                  type="text"
+                  placeholder="🔍 Search by Order ID, Customer Name or Mobile..."
+                  value={preOrderSearch}
+                  onChange={(e) => setPreOrderSearch(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {filteredPreOrders.length === 0 ? (
+                <p className="empty-cart-text">No pre-orders match "{preOrderSearch}".</p>
+              ) : (
+                <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                  {filteredPreOrders.map(po => (
+                    <div key={po.id} style={{ padding: '12px', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '8px', background: '#fafafa' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <strong>{po.customers?.name || 'Walk-in Customer'}</strong>
+                          <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '6px' }}>({po.customers?.phone || 'No Phone'})</span>
+                        </div>
+                        <span style={{ fontWeight: 'bold', color: '#0f172a' }}>Total: ₹{po.total_amount}</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                        Order ID: <strong>#{po.id.slice(0, 8)}</strong> | Paid Advance: <strong style={{ color: '#16a34a' }}>₹{po.paid_amount}</strong> | Balance Due: <strong style={{ color: '#b91c1c' }}>₹{(po.total_amount - po.paid_amount).toFixed(2)}</strong>
+                      </div>
+                      <button className="primary-btn" style={{ marginTop: '8px', width: '100%' }} onClick={() => handleLoadPreOrderForConversion(po)}>
+                        Load & Fulfill Pre-Order →
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button className="cancel-btn" onClick={() => { setShowPreOrderModal(false); setPreOrderSearch(''); }}>Close</button>
+            </div>
+          </div>
+        )}
 
         {/* Modal: New Customer */}
         {showNewCustomerModal && (
@@ -763,15 +993,12 @@ export default function POSPage() {
               <form onSubmit={handleCreateCustomer}>
                 <label>Customer Name</label>
                 <input placeholder="Full name" value={newCust.name} onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} required />
-                
                 <label>Mobile Number</label>
                 <input placeholder="Phone number" value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} />
-
-                <label>Email Address (Optional)</label>
-                <input type="email" placeholder="Email address" value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} />
-                
+                <label>Email Address</label>
+                <input type="email" placeholder="Email" value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} />
                 <div className="modal-actions">
-                  <button type="submit" className="action-btn">Save & Select Customer</button>
+                  <button type="submit" className="primary-btn">Save & Select</button>
                   <button type="button" className="cancel-btn" onClick={() => setShowNewCustomerModal(false)}>Cancel</button>
                 </div>
               </form>
@@ -779,273 +1006,81 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Modal & Printable Receipt */}
-        {showReceiptModal && completedOrder && (
-          <div className="modal-overlay receipt-modal-overlay">
-            <div className="modal receipt-modal-container">
-              <div className="receipt-actions no-print">
-                <h3>Sale Completed Successfully!</h3>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="primary-btn" onClick={handlePrint}>🖨️ Print Receipt (A5 Half Sheet)</button>
-                  <button className="cancel-btn" onClick={() => setShowReceiptModal(false)}>Close</button>
-                </div>
-              </div>
-
-              {/* PRINTABLE RECEIPT TEMPLATE */}
-              <div id="printable-receipt" className="receipt-box">
-                <div className="receipt-header">
-                  <h2>{completedOrder.shopName}</h2>
-                  <p className="receipt-subtitle">Estimate</p>
-                  <div className="receipt-meta">
-                    <div><strong>Date:</strong> {completedOrder.date}</div>
-                    <div><strong>Order ID:</strong> {completedOrder.saleId?.slice(0, 8)}</div>
-                  </div>
-                  <div className="receipt-meta">
-                    <div><strong>Customer:</strong> {completedOrder.customer} {completedOrder.customerPhone ? `(${completedOrder.customerPhone})` : ''}</div>
-                    <div><strong>Payment:</strong> {completedOrder.paymentMethod.toUpperCase()}</div>
-                  </div>
-                  <div className="receipt-meta">
-                    <div><strong>Sales Lead:</strong> {completedOrder.salesmanName}</div>
-                  </div>
-                </div>
-
-                <table className="receipt-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Item Description</th>
-                      <th>Qty</th>
-                      <th>Rate (₹)</th>
-                      <th>Total (₹)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {completedOrder.items.map((it, idx) => (
-                      <tr key={idx}>
-                        <td>{idx + 1}</td>
-                        <td>
-                          {it.name || it.sku}
-                          {it.has_gst && it.gst_percentage > 0 && (
-                            <span className="receipt-subtext"> (Incl. {it.gst_percentage}% GST)</span>
-                          )}
-                        </td>
-                        <td>{it.quantity}</td>
-                        <td>₹{Number(it.price).toFixed(2)}</td>
-                        <td>₹{(it.quantity * it.price).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                <div className="receipt-summary-block">
-                  {completedOrder.totalGst > 0 && (
-                    <div className="receipt-row">
-                      <span>Taxable Amount (Base):</span>
-                      <span>₹{completedOrder.totalBase.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {completedOrder.totalGst > 0 && (
-                    <div className="receipt-row">
-                      <span>Total GST Extracted:</span>
-                      <span>₹{completedOrder.totalGst.toFixed(2)}</span>
-                    </div>
-                  )}
-                  <div className="receipt-row grand-total-row">
-                    <span>Grand Total:</span>
-                    <span>₹{completedOrder.totalAmount.toFixed(2)}</span>
-                  </div>
-                  <div className="receipt-row">
-                    <span>Amount Paid:</span>
-                    <span>₹{completedOrder.paidAmount.toFixed(2)}</span>
-                  </div>
-                  {completedOrder.pendingAmount > 0 && (
-                    <div className="receipt-row pending-row" style={{ color: '#b91c1c', fontWeight: 'bold' }}>
-                      <span>Balance Due / Pending:</span>
-                      <span>₹{completedOrder.pendingAmount.toFixed(2)}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="receipt-footer">
-                  <p>Thank you for shopping with us!</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Shared Printable Receipt Modal */}
+        <PrintableReceiptModal
+          show={showReceiptModal}
+          onClose={() => setShowReceiptModal(false)}
+          completedGstOrder={completedGstOrder}
+          completedEstimateOrder={completedEstimateOrder}
+        />
       </main>
 
       <style jsx>{`
-        /* --- POS PAGE STYLES --- */
         .layout { display: flex; min-height: 100vh; background: #f8fafc; }
         .content { flex: 1; padding: 24px; box-sizing: border-box; }
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .pos-container { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
-        .card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; height: fit-content; }
+        .card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; }
         .search-dropdown-container { position: relative; margin-bottom: 20px; }
-        
-        .search-form-group { display: flex; gap: 8px; align-items: center; width: 100%; }
-        .search-input { flex: 1; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
-        .search-btn { background: #0f172a; color: white; border: none; padding: 10px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 13px; white-space: nowrap; }
-        .clear-btn { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; }
-        .clear-btn:hover { background: #e2e8f0; }
-
-        .dropdown-list { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 6px; max-height: 250px; overflow-y: auto; z-index: 50; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-top: 2px; }
-        .dropdown-item { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-        .dropdown-item:hover { background: #f8fafc; }
-        .dropdown-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-        .dropdown-item .price { font-weight: bold; color: #0f172a; }
-        .subtext { font-size: 11px; color: #94a3b8; }
-        .stock-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
-        .stock-badge.green { background: #dcfce7; color: #15803d; }
-        .stock-badge.red { background: #fee2e2; color: #b91c1c; }
+        .search-form-group { display: flex; gap: 8px; }
+        .search-input { flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+        .search-btn, .primary-btn { background: #0f172a; color: white; border: none; padding: 10px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; }
+        .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 10px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; }
+        .clear-btn { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        .dropdown-list { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 50; }
+        .dropdown-item { padding: 10px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .create-new-prompt { color: #0284c7; background: #f0f9ff; font-size: 13px; }
+        .item-tax-tag { margin-top: 2px; }
+        .gst-tag { background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+        .estimate-tag { background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+        .cart-gst-badge { background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; display: inline-block; }
+        .cart-est-badge { background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; display: inline-block; }
         .quick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 10px; }
-        .quick-tile { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; text-align: left; cursor: pointer; transition: 0.15s; display: flex; flex-direction: column; gap: 4px; }
-        .quick-tile:hover { background: #f1f5f9; border-color: #cbd5e1; }
-        .tile-name { font-weight: 600; font-size: 13px; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .tile-price { font-weight: bold; color: #0284c7; font-size: 13px; }
-        .tile-stock { font-size: 11px; color: #64748b; }
-        .cart-card { display: flex; flex-direction: column; }
-        
-        /* 2-COLUMN ALIGNED FORM ROW FOR CUSTOMER & SALESMAN */
+        .quick-tile { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 4px; position: relative; }
+        .tile-name { font-weight: 600; font-size: 13px; }
+        .tile-price { font-weight: bold; color: #0284c7; }
+        .tile-tax { font-size: 9px; font-weight: 700; padding: 2px 4px; border-radius: 3px; width: fit-content; }
+        .tile-tax.gst { background: #e0f2fe; color: #0369a1; }
+        .tile-tax.estimate { background: #fef3c7; color: #92400e; }
         .pos-meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
         .select-section { position: relative; }
-        .select-section label { font-size: 12px; color: #64748b; display: block; margin-bottom: 4px; font-weight: 600; }
+        .select-section label { font-size: 12px; color: #64748b; font-weight: 600; display: block; margin-bottom: 4px; }
         .customer-input-row { display: flex; position: relative; }
-        .clear-cust-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #64748b; cursor: pointer; font-weight: bold; }
-        .create-new-prompt { color: #0284c7; background: #f0fdf4; width: 100%; justify-content: flex-start; }
-        .cart-items-wrapper { min-height: 200px; max-height: 320px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; }
+        .clear-cust-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #64748b; cursor: pointer; }
+        .cart-items-wrapper { min-height: 180px; max-height: 280px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 16px; }
         .cart-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .cart-table th { background: #f1f5f9; padding: 8px 10px; text-align: left; color: #475569; }
-        .cart-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
-        .empty-cart-text { text-align: center; color: #94a3b8; padding: 40px 0; margin: 0; font-size: 13px; }
+        .cart-table th { background: #f1f5f9; padding: 8px; text-align: left; }
+        .cart-table td { padding: 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
         .qty-controls { display: flex; align-items: center; gap: 6px; }
-        .qty-controls button { background: #e2e8f0; border: none; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .remove-btn { background: none; border: none; color: #ef4444; cursor: pointer; font-weight: bold; font-size: 14px; }
-        .price-edit-cell { display: flex; flex-direction: column; gap: 2px; }
-        .table-price-input { width: 80px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
-        .original-price-strike { font-size: 11px; color: #94a3b8; text-decoration: line-through; }
+        .qty-controls button { background: #e2e8f0; border: none; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; }
+        .table-price-input { width: 80px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; }
+        .remove-btn { background: none; border: none; color: #ef4444; cursor: pointer; font-weight: bold; }
         .cart-summary { border-top: 1px solid #e2e8f0; padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
         .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #64748b; }
-        .strike-text { text-decoration: line-through; color: #94a3b8; }
-        .adjustment-row { margin-bottom: 4px; }
-        .custom-total-input { width: 120px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; text-align: right; }
-        .total-row { display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: bold; margin-top: 4px; margin-bottom: 10px; color: #0f172a; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
-        .grand-total { font-size: 20px; color: #16a34a; }
+        .custom-total-input { width: 140px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; text-align: right; font-size: 13px; }
+        .custom-total-input.highlight-required { border-color: #ef4444; background: #fef2f2; }
+        .total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: 16px; margin-top: 6px; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
+        .grand-total { color: #16a34a; font-size: 20px; }
         .checkout-btn { width: 100%; background: #16a34a; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; }
-        .checkout-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+        .segmented-control { display: flex; background: #e2e8f0; padding: 2px; border-radius: 6px; gap: 2px; }
+        .segmented-control button { flex: 1; padding: 8px; border: none; background: transparent; font-size: 12px; font-weight: 600; color: #64748b; border-radius: 4px; cursor: pointer; }
+        .segmented-control button.active { background: white; color: #0f172a; }
+
+        /* Pre-Order Summary Card Styling */
+        .preorder-ledger-card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+        .text-blue { color: #0284c7; font-weight: 600; }
+        .text-red { color: #dc2626; }
+        .font-bold { font-weight: 700; }
+        .font-semibold { font-weight: 600; }
+        .border-top-dashed { border-top: 1px dashed #cbd5e1; padding-top: 6px; }
+        .pay-input { border-color: #0284c7; font-weight: bold; }
+        .subtext-balance { font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 4px; }
+        .balance-warning-note { font-size: 11px; color: #b91c1c; background: #fef2f2; padding: 4px 8px; border-radius: 4px; margin-top: 2px; border: 1px solid #fecaca; }
+
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
-        .modal { background: white; padding: 24px; border-radius: 8px; width: 400px; display: flex; flex-direction: column; gap: 10px; }
-        .modal input { padding: 10px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; box-sizing: border-box; }
-        .modal label { font-size: 12px; color: #475569; font-weight: 500; }
-        .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
-        .action-btn, .primary-btn { padding: 10px 16px; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
-        .cancel-btn { padding: 10px 16px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; }
-
-        /* Receipt On-Screen Modal Layout */
-        .receipt-modal-container { width: 550px; max-height: 90vh; overflow-y: auto; }
-        .receipt-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; }
-        .receipt-box { background: #fff; padding: 20px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: sans-serif; }
-        .receipt-header { text-align: center; border-bottom: 1px dashed #0f172a; padding-bottom: 10px; margin-bottom: 12px; }
-        .receipt-header h2 { margin: 0 0 4px 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px; }
-        .receipt-subtitle { margin: 0 0 10px 0; font-size: 12px; color: #64748b; }
-        .receipt-meta { display: flex; justify-content: space-between; font-size: 12px; margin-top: 4px; color: #334155; }
-        .receipt-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
-        .receipt-table th { border-top: 1px solid #0f172a; border-bottom: 1px solid #0f172a; padding: 6px 4px; text-align: left; }
-        .receipt-table td { padding: 6px 4px; border-bottom: 1px solid #f1f5f9; }
-        .receipt-subtext { font-size: 10px; color: #64748b; }
-        .receipt-summary-block { border-top: 1px dashed #0f172a; padding-top: 8px; margin-top: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-        .receipt-row { display: flex; justify-content: space-between; }
-        .grand-total-row { font-size: 14px; font-weight: bold; border-top: 1px solid #0f172a; border-bottom: 1px solid #0f172a; padding: 4px 0; margin: 4px 0; }
-        .receipt-footer { text-align: center; font-size: 11px; color: #64748b; margin-top: 16px; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
-      `}</style>
-
-     <style jsx global>{`
-        #print-mount-root {
-          display: none !important;
-        }
-
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 0;
-          }
-
-          html,
-          body {
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 210mm !important;
-            height: 297mm !important;
-            overflow: hidden !important;
-            background: #fff !important;
-          }
-
-          body > *:not(#print-mount-root) {
-            display: none !important;
-          }
-
-          body > #print-mount-root {
-            display: block !important;
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 210mm !important;
-            height: 148mm !important;
-            margin: 0 !important;
-            padding: 8mm !important;
-            box-sizing: border-box !important;
-            overflow: hidden !important;
-            background: #fff !important;
-            color: #000 !important;
-            page-break-after: avoid !important;
-            page-break-inside: avoid !important;
-          }
-
-          #print-mount-root,
-          #print-mount-root * {
-            box-sizing: border-box !important;
-          }
-
-          #print-mount-root .receipt-box {
-            display: block !important;
-            width: 100% !important;
-            height: 100% !important;
-            max-height: 132mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            border: 0 !important;
-            box-shadow: none !important;
-            font-family: Arial, sans-serif !important;
-            color: #000 !important;
-            background: #fff !important;
-          }
-
-          #print-mount-root .no-print {
-            display: none !important;
-          }
-
-          #print-mount-root .receipt-table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-          }
-
-          #print-mount-root .receipt-table thead {
-            display: table-header-group;
-          }
-
-          #print-mount-root .receipt-table tr {
-            break-inside: avoid;
-            page-break-inside: avoid;
-          }
-
-          #print-mount-root .receipt-header,
-          #print-mount-root .receipt-summary-block,
-          #print-mount-root .receipt-footer {
-            break-inside: avoid;
-            page-break-inside: avoid;
-          }
-        }
+        .modal { background: white; padding: 24px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; width: 400px; }
+        .modal input { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; box-sizing: border-box; }
+        .cancel-btn { padding: 10px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; }
       `}</style>
     </div>
   );

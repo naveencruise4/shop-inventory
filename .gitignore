@@ -3,3 +3,9 @@
 package-lock.json
 node_modules
 .next
+
+# Next.js build and static export outputs
+out/
+build/
+dist/
+.DS_Store

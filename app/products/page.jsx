@@ -18,16 +18,11 @@ export default function ProductsPage() {
   // Search & Filter States
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
-  // const [categoryFilter, setCategoryFilter] = useState('all');
-  // const [statusFilter, setStatusFilter] = useState('all');
   const [sortBy, setSortBy] = useState('name_asc');
 
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-
-  // Available Categories List (Temporarily disabled dropdown)
-  // const [categoriesList, setCategoriesList] = useState([]);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -38,6 +33,8 @@ export default function ProductsPage() {
   const [newProd, setNewProd] = useState({
     sku: '',
     name: '',
+    brand_name: '',
+    hsn_code: '',
     category_name: 'General',
     initial_quantity: '0',
     purchase_price: '',
@@ -45,22 +42,31 @@ export default function ProductsPage() {
     margin_pct: '',
     purchase_date: new Date().toISOString().split('T')[0],
     min_stock_level: 3,
-    // Purchase GST
-    has_purchase_gst: false,
+    purchase_tax_mode: 'estimate',
     purchase_gst_percentage: '18',
-    // Selling GST
-    has_gst: false,
+    selling_tax_mode: 'estimate',
     gst_percentage: '18'
   });
 
-  const [editProd, setEditProd] = useState({ selling_price: '', margin_pct: '' });
+  // Extended Edit Form State: Separating MRP (selling_price), staff_price, and final_price
+  const [editProd, setEditProd] = useState({
+    name: '',
+    brand_name: '',
+    category_name: '',
+    hsn_code: '',
+    total_stock: '',
+    selling_price: '',
+    staff_price: '',
+    final_price: ''
+  });
+
   const [restock, setRestock] = useState({ quantity: '', purchase_price: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
 
   // Tab Data
   const [purchasesHistory, setPurchasesHistory] = useState([]);
   const [salesHistory, setSalesHistory] = useState([]);
+  const [latestPurchaseCost, setLatestPurchaseCost] = useState(null);
 
-  // Initial authentication & shop resolution
   useEffect(() => {
     initShop();
   }, []);
@@ -77,25 +83,9 @@ export default function ProductsPage() {
 
     if (appUser?.shop_id) {
       setShopId(appUser.shop_id);
-      // fetchCategories(appUser.shop_id);
     }
   };
 
-  /*
-  const fetchCategories = async (sid) => {
-    const { data } = await supabase
-      .from('vw_product_stock')
-      .select('category_name')
-      .eq('shop_id', sid);
-
-    if (data) {
-      const unique = Array.from(new Set(data.map(d => d.category_name).filter(Boolean)));
-      setCategoriesList(unique);
-    }
-  };
-  */
-
-  // Explicit Search Form Handlers
   const handleSearchSubmit = (e) => {
     if (e) e.preventDefault();
     setAppliedSearch(search.trim());
@@ -108,7 +98,6 @@ export default function ProductsPage() {
     setCurrentPage(1);
   };
 
-  // Main Database-Level Query
   const fetchProducts = useCallback(async () => {
     if (!shopId) return;
     setLoading(true);
@@ -119,27 +108,11 @@ export default function ProductsPage() {
         .select('*', { count: 'exact' })
         .eq('shop_id', shopId);
 
-      // 1. Server-Side Multi-Field Search
       if (appliedSearch) {
         const q = `%${appliedSearch}%`;
-        query = query.or(`name.ilike.${q},sku.ilike.${q},category_name.ilike.${q}`);
+        query = query.or(`name.ilike.${q},sku.ilike.${q},category_name.ilike.${q},brand_name.ilike.${q},hsn_code.ilike.${q}`);
       }
 
-      /*
-      // 2. Server-Side Category Filter (Disabled)
-      if (categoryFilter !== 'all') {
-        query = query.eq('category_name', categoryFilter);
-      }
-
-      // 3. Server-Side Stock Status Filter (Disabled)
-      if (statusFilter !== 'all') {
-        if (statusFilter === 'healthy') query = query.eq('status', 'Healthy');
-        if (statusFilter === 'low') query = query.eq('status', 'Low');
-        if (statusFilter === 'out-of-stock') query = query.eq('status', 'Out of Stock');
-      }
-      */
-
-      // 4. Server-Side Sorting
       if (sortBy === 'name_asc') query = query.order('name', { ascending: true });
       if (sortBy === 'name_desc') query = query.order('name', { ascending: false });
       if (sortBy === 'price_asc') query = query.order('selling_price', { ascending: true });
@@ -147,7 +120,6 @@ export default function ProductsPage() {
       if (sortBy === 'stock_asc') query = query.order('available_stock', { ascending: true });
       if (sortBy === 'stock_desc') query = query.order('available_stock', { ascending: false });
 
-      // 5. Server-Side Range Calculation for Pagination
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
 
@@ -172,10 +144,26 @@ export default function ProductsPage() {
 
   useEffect(() => {
     if (selectedProduct) {
+      fetchLatestPurchaseCost(selectedProduct.id);
       if (activeTab === 'purchases') fetchPurchaseHistory(selectedProduct.id);
       if (activeTab === 'sales') fetchSalesHistory(selectedProduct.sku);
     }
   }, [selectedProduct, activeTab]);
+
+  const fetchLatestPurchaseCost = async (productId) => {
+    const { data } = await supabase
+      .from('product_purchases')
+      .select('purchase_price')
+      .eq('product_id', productId)
+      .order('purchase_date', { ascending: false })
+      .limit(1);
+
+    if (data && data.length > 0) {
+      setLatestPurchaseCost(data[0].purchase_price);
+    } else {
+      setLatestPurchaseCost(selectedProduct?.avg_cost_price || 0);
+    }
+  };
 
   const fetchPurchaseHistory = async (productId) => {
     const { data } = await supabase
@@ -217,19 +205,6 @@ export default function ProductsPage() {
     }
   };
 
-  const handleEditPriceChange = (field, val) => {
-    const cost = Number(selectedProduct?.avg_cost_price || 0);
-    if (field === 'selling_price') {
-      const sell = Number(val);
-      const margin = (sell && cost) ? (((sell - cost) / sell) * 100).toFixed(1) : '';
-      setEditProd({ selling_price: val, margin_pct: margin });
-    } else if (field === 'margin_pct') {
-      const margin = Number(val);
-      const sell = (cost && margin < 100) ? (cost / (1 - margin / 100)).toFixed(2) : editProd.selling_price;
-      setEditProd({ margin_pct: val, selling_price: sell });
-    }
-  };
-
   const handleCreateProduct = async (e) => {
     e.preventDefault();
     if (!shopId) return;
@@ -237,20 +212,25 @@ export default function ProductsPage() {
     const initQty = Number(newProd.initial_quantity || 0);
     const costPrice = Number(newProd.purchase_price || 0);
 
+    const hasPurchaseGst = newProd.purchase_tax_mode === 'gst';
+    const hasSellingGst = newProd.selling_tax_mode === 'gst';
+
     const { data: prodData, error: prodErr } = await supabase.from('productsinfo').insert([{
       shop_id: shopId,
       sku: newProd.sku,
       name: newProd.name,
+      brand_name: newProd.brand_name?.trim() || null,
+      hsn_code: hasSellingGst ? (newProd.hsn_code?.trim() || null) : null,
       category_name: newProd.category_name,
       selling_price: Number(newProd.selling_price),
       min_stock_level: Number(newProd.min_stock_level),
       stock_quantity: initQty,
       total_stock: initQty,
       avg_cost_price: costPrice,
-      has_purchase_gst: newProd.has_purchase_gst,
-      purchase_gst_percentage: newProd.has_purchase_gst ? Number(newProd.purchase_gst_percentage) : 0.00,
-      has_gst: newProd.has_gst,
-      gst_percentage: newProd.has_gst ? Number(newProd.gst_percentage) : 0.00
+      has_purchase_gst: hasPurchaseGst,
+      purchase_gst_percentage: hasPurchaseGst ? Number(newProd.purchase_gst_percentage) : 0.00,
+      has_gst: hasSellingGst,
+      gst_percentage: hasSellingGst ? Number(newProd.gst_percentage) : 0.00
     }]).select().single();
 
     if (prodErr) {
@@ -270,11 +250,11 @@ export default function ProductsPage() {
 
     setShowAddModal(false);
     setNewProd({ 
-      sku: '', name: '', category_name: 'General', initial_quantity: '0', 
+      sku: '', name: '', brand_name: '', hsn_code: '', category_name: 'General', initial_quantity: '0', 
       purchase_price: '', selling_price: '', margin_pct: '', 
       purchase_date: new Date().toISOString().split('T')[0], min_stock_level: 3, 
-      has_purchase_gst: false, purchase_gst_percentage: '18',
-      has_gst: false, gst_percentage: '18' 
+      purchase_tax_mode: 'estimate', purchase_gst_percentage: '18',
+      selling_tax_mode: 'estimate', gst_percentage: '18' 
     });
     fetchProducts();
   };
@@ -283,16 +263,39 @@ export default function ProductsPage() {
     e.preventDefault();
     if (!selectedProduct) return;
 
+    const newTotalStock = Number(editProd.total_stock);
+    const deliveredStock = Number(selectedProduct.delivered_stock || 0);
+
+    // Validation: Total stock cannot be less than delivered stock
+    if (newTotalStock < deliveredStock) {
+      alert(`⚠️ Total stock cannot be less than delivered stock (${deliveredStock} units already fulfilled in orders).`);
+      return;
+    }
+
+    const diffStock = newTotalStock - Number(selectedProduct.total_stock);
+    const updatedAvailableStock = Number(selectedProduct.available_stock) + diffStock;
+
     const { error } = await supabase.from('productsinfo').update({
-      selling_price: Number(editProd.selling_price)
+      name: editProd.name.trim(),
+      brand_name: editProd.brand_name?.trim() || null,
+      category_name: editProd.category_name.trim(),
+      hsn_code: editProd.hsn_code?.trim() || null,
+      total_stock: newTotalStock,
+      stock_quantity: updatedAvailableStock,
+      selling_price: Number(editProd.selling_price), // MRP
+      staff_price: editProd.staff_price !== '' ? Number(editProd.staff_price) : null,
+      final_price: editProd.final_price !== '' ? Number(editProd.final_price) : null
     }).eq('id', selectedProduct.id);
 
-    if (!error) {
-      setShowEditModal(false);
-      const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
-      if (updated) setSelectedProduct(updated);
-      fetchProducts();
+    if (error) {
+      alert(`Error updating product: ${error.message}`);
+      return;
     }
+
+    setShowEditModal(false);
+    const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
+    if (updated) setSelectedProduct(updated);
+    fetchProducts();
   };
 
   const handleRestock = async (e) => {
@@ -330,6 +333,7 @@ export default function ProductsPage() {
     
     const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
     if (updated) setSelectedProduct(updated);
+    fetchLatestPurchaseCost(selectedProduct.id);
     fetchProducts();
   };
 
@@ -346,32 +350,47 @@ export default function ProductsPage() {
                 <div>
                   <h2>{selectedProduct.name}</h2>
                   <span className="sku-badge">SKU: {selectedProduct.sku}</span>
-                  {selectedProduct.has_gst && (
-                    <span className="sku-badge" style={{ marginLeft: '8px', background: '#e0f2fe', color: '#0369a1' }}>
-                      Selling GST {selectedProduct.gst_percentage}%
+                  {selectedProduct.brand_name && (
+                    <span className="sku-badge" style={{ marginLeft: '8px', background: '#f1f5f9', color: '#334155' }}>
+                      Brand: {selectedProduct.brand_name}
                     </span>
                   )}
-                  {selectedProduct.has_purchase_gst && (
+                  {selectedProduct.hsn_code && (
                     <span className="sku-badge" style={{ marginLeft: '8px', background: '#fef3c7', color: '#92400e' }}>
-                      Purchase GST {selectedProduct.purchase_gst_percentage}%
+                      HSN: {selectedProduct.hsn_code}
+                    </span>
+                  )}
+                  {selectedProduct.has_gst ? (
+                    <span className="sku-badge" style={{ marginLeft: '8px', background: '#e0f2fe', color: '#0369a1' }}>
+                      Selling GST: {selectedProduct.gst_percentage}%
+                    </span>
+                  ) : (
+                    <span className="sku-badge" style={{ marginLeft: '8px', background: '#f1f5f9', color: '#64748b' }}>
+                      Selling: Estimate / Non-GST
                     </span>
                   )}
                 </div>
                 <div className="btn-group">
                   <button className="secondary-btn" onClick={() => {
-                    const cost = selectedProduct.avg_cost_price || 0;
-                    const sell = selectedProduct.selling_price || 0;
-                    const margin = (sell && cost) ? (((sell - cost) / sell) * 100).toFixed(1) : '';
-                    setEditProd({ selling_price: sell, margin_pct: margin });
+                    setEditProd({
+                      name: selectedProduct.name || '',
+                      brand_name: selectedProduct.brand_name || '',
+                      category_name: selectedProduct.category_name || '',
+                      hsn_code: selectedProduct.hsn_code || '',
+                      total_stock: selectedProduct.total_stock || 0,
+                      selling_price: selectedProduct.selling_price || 0,
+                      staff_price: selectedProduct.staff_price ?? '',
+                      final_price: selectedProduct.final_price ?? ''
+                    });
                     setShowEditModal(true);
-                  }}>✎ Edit Price / Margin</button>
+                  }}>✎ Edit Product Details</button>
                   <button className="action-btn" onClick={() => setShowRestockModal(true)}>+ Restock Inventory</button>
                 </div>
               </div>
 
               <div className="metrics-bar">
                 <div className="metric">
-                  <span className="label">Selling Price (Inclusive)</span>
+                  <span className="label">Selling Price (MRP)</span>
                   <span className="val">₹{Number(selectedProduct.selling_price).toLocaleString()}</span>
                   {selectedProduct.has_gst && (
                     <span className="subtext">
@@ -380,21 +399,16 @@ export default function ProductsPage() {
                   )}
                 </div>
                 <div className="metric">
-                  <span className="label">Avg Purchase Cost</span>
-                  <span className="val">₹{Number(selectedProduct.avg_cost_price).toLocaleString()}</span>
-                  {selectedProduct.has_purchase_gst && (
-                    <span className="subtext">
-                      Base: ₹{(selectedProduct.avg_cost_price / (1 + selectedProduct.purchase_gst_percentage / 100)).toFixed(2)}
-                    </span>
-                  )}
+                  <span className="label">Staff Price</span>
+                  <span className="val">₹{selectedProduct.staff_price ? Number(selectedProduct.staff_price).toLocaleString() : '—'}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Final Price</span>
+                  <span className="val text-green">₹{selectedProduct.final_price ? Number(selectedProduct.final_price).toLocaleString() : '—'}</span>
                 </div>
                 <div className="metric">
                   <span className="label">Total Stock</span>
                   <span className="val">{selectedProduct.total_stock}</span>
-                </div>
-                <div className="metric">
-                  <span className="label">Delivered</span>
-                  <span className="val text-green">{selectedProduct.delivered_stock}</span>
                 </div>
                 <div className="metric">
                   <span className="label">Available</span>
@@ -416,32 +430,24 @@ export default function ProductsPage() {
                 <div className="info-grid">
                   <div className="card">
                     <h4>Product Info</h4>
+                    <p><strong>Brand Name:</strong> {selectedProduct.brand_name || 'N/A'}</p>
                     <p><strong>Category:</strong> {selectedProduct.category_name}</p>
+                    <p><strong>HSN Code:</strong> {selectedProduct.hsn_code || 'N/A'}</p>
                     <p><strong>Stock Status:</strong> <span className={`status-tag ${(selectedProduct.status || '').toLowerCase().replace(/\s+/g, '-')}`}>{selectedProduct.status}</span></p>
                     <p><strong>Min Reorder Level:</strong> {selectedProduct.min_stock_level || 3} units</p>
-                    <p><strong>Selling Tax Rate:</strong> {selectedProduct.has_gst ? `${selectedProduct.gst_percentage}% (Tax-inclusive)` : 'Non-GST / Exempt'}</p>
-                    <p><strong>Purchase Tax Rate:</strong> {selectedProduct.has_purchase_gst ? `${selectedProduct.purchase_gst_percentage}% (Tax-inclusive)` : 'Non-GST / Exempt'}</p>
+                    <p><strong>Selling Type:</strong> {selectedProduct.has_gst ? `GST Invoice (${selectedProduct.gst_percentage}%)` : 'Estimate / Non-GST'}</p>
+                    <p><strong>Purchase Type:</strong> {selectedProduct.has_purchase_gst ? `GST Purchase (${selectedProduct.purchase_gst_percentage}%)` : 'Estimate / Non-GST'}</p>
                   </div>
                   <div className="card">
-                    <h4>Margin & Tax Breakdown</h4>
-                    {selectedProduct.selling_price > 0 && (
+                    <h4>Pricing & Cost Breakdown</h4>
+                     <p><strong>Selling Price (MRP):</strong> ₹{Number(selectedProduct.selling_price).toFixed(2)}</p>
+                    <p><strong>Staff Price:</strong> ₹{selectedProduct.staff_price ? Number(selectedProduct.staff_price).toFixed(2) : '—'}</p>
+                    <p><strong>Final Price:</strong> <span style={{ color: '#16a34a', fontWeight: 'bold' }}>₹{selectedProduct.final_price ? Number(selectedProduct.final_price).toFixed(2) : '—'}</span></p>
+                    {latestPurchaseCost > 0 && selectedProduct.selling_price > 0 && (
                       <>
-                        <p><strong>Gross Profit/Unit:</strong> ₹{(selectedProduct.selling_price - selectedProduct.avg_cost_price).toFixed(2)}</p>
-                        <p><strong>Margin %:</strong> {(((selectedProduct.selling_price - selectedProduct.avg_cost_price) / selectedProduct.selling_price) * 100).toFixed(1)}%</p>
-                        
                         <hr style={{ margin: '10px 0', border: '0', borderTop: '1px dashed #e2e8f0' }} />
-                        {selectedProduct.has_gst && (
-                          <>
-                            <p><strong>Selling Tax Base Price:</strong> ₹{(selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100)).toFixed(2)}</p>
-                            <p><strong>Output GST (Sales):</strong> ₹{(selectedProduct.selling_price - (selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100))).toFixed(2)}</p>
-                          </>
-                        )}
-                        {selectedProduct.has_purchase_gst && (
-                          <>
-                            <p style={{ marginTop: '6px' }}><strong>Purchase Tax Base Price:</strong> ₹{(selectedProduct.avg_cost_price / (1 + selectedProduct.purchase_gst_percentage / 100)).toFixed(2)}</p>
-                            <p><strong>Input GST (Purchases):</strong> ₹{(selectedProduct.avg_cost_price - (selectedProduct.avg_cost_price / (1 + selectedProduct.purchase_gst_percentage / 100))).toFixed(2)}</p>
-                          </>
-                        )}
+                        <p><strong>Estimated GPU:</strong> ₹{(selectedProduct.selling_price - latestPurchaseCost).toFixed(2)}</p>
+                        <p><strong>Estimated PM %:</strong> {(((selectedProduct.selling_price - latestPurchaseCost) / selectedProduct.selling_price) * 100).toFixed(1)}%</p>
                       </>
                     )}
                   </div>
@@ -516,120 +522,109 @@ export default function ProductsPage() {
             </div>
           </div>
         ) : (
-          <>
-            <div className="top-bar">
-              <div>
-                <h1>Products Catalog</h1>
-                <p className="subtext" style={{ marginTop: '2px' }}>
-                  Total Catalog Count: <strong>{totalCount}</strong> product{totalCount !== 1 ? 's' : ''}
-                </p>
+          <div className="products-view-container">
+            <div className="sticky-top-container">
+              <div className="top-bar">
+                <div>
+                  <h1>Products Catalog</h1>
+                  <p className="subtext" style={{ marginTop: '2px' }}>
+                    Total Catalog Count: <strong>{totalCount}</strong> product{totalCount !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <button className="primary-btn" onClick={() => setShowAddModal(true)}>+ Add Product</button>
               </div>
-              <button className="primary-btn" onClick={() => setShowAddModal(true)}>+ Add Product</button>
-            </div>
 
-            {/* FILTER CONTROL PANEL */}
-            <div className="card filter-card">
-              <div className="filter-grid">
-                {/* Search Bar */}
-                <div className="filter-item flex-2">
-                  <label>Search Products</label>
-                  <form onSubmit={handleSearchSubmit} className="search-form-group">
-                    <input 
-                      type="text"
-                      placeholder="Type Name, SKU, or Category & press Enter..." 
-                      value={search} 
-                      onChange={(e) => setSearch(e.target.value)} 
-                      className="search-input" 
-                    />
-                    <button type="submit" className="search-btn">
-                      🔍 Search
-                    </button>
-                    {appliedSearch && (
-                      <button type="button" onClick={handleClearSearch} className="clear-btn">
-                        ✕ Clear
+              {/* FILTER CONTROL PANEL */}
+              <div className="card filter-card">
+                <div className="filter-grid">
+                  <div className="filter-item flex-2">
+                    <label>Search Products</label>
+                    <form onSubmit={handleSearchSubmit} className="search-form-group">
+                      <input 
+                        type="text"
+                        placeholder="Type Name, SKU, Brand, HSN or Category & press Enter..." 
+                        value={search} 
+                        onChange={(e) => setSearch(e.target.value)} 
+                        className="search-input" 
+                      />
+                      <button type="submit" className="search-btn">
+                        🔍 Search
                       </button>
-                    )}
-                  </form>
-                </div>
+                      {appliedSearch && (
+                        <button type="button" onClick={handleClearSearch} className="clear-btn">
+                          ✕ Clear
+                        </button>
+                      )}
+                    </form>
+                  </div>
 
-                {/* 
-                -- DISABLED FOR NOW --
-                <div className="filter-item">
-                  <label>Category</label>
-                  <select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}>
-                    <option value="all">All Categories</option>
-                    {categoriesList.map((cat, idx) => (
-                      <option key={idx} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="filter-item">
-                  <label>Stock Status</label>
-                  <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}>
-                    <option value="all">All Statuses</option>
-                    <option value="healthy">Healthy Stock</option>
-                    <option value="low">Low Stock</option>
-                    <option value="out-of-stock">Out of Stock</option>
-                  </select>
-                </div>
-                */}
-
-                {/* Sort By Dropdown */}
-                <div className="filter-item">
-                  <label>Sort By</label>
-                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                    <option value="name_asc">Name (A - Z)</option>
-                    <option value="name_desc">Name (Z - A)</option>
-                    <option value="price_asc">Price (Low to High)</option>
-                    <option value="price_desc">Price (High to Low)</option>
-                    <option value="stock_asc">Stock (Low to High)</option>
-                    <option value="stock_desc">Stock (High to Low)</option>
-                  </select>
+                  <div className="filter-item">
+                    <label>Sort By</label>
+                    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                      <option value="name_asc">Name (A - Z)</option>
+                      <option value="name_desc">Name (Z - A)</option>
+                      <option value="price_asc">Price (Low to High)</option>
+                      <option value="price_desc">Price (High to Low)</option>
+                      <option value="stock_asc">Stock (Low to High)</option>
+                      <option value="stock_desc">Stock (High to Low)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* PRODUCTS TABLE WITH SERVER-SIDE PAGINATION */}
-            <div className="table-wrapper card" style={{ marginTop: '16px' }}>
+            {/* PRODUCTS TABLE CONTAINER WITH INNER SCROLL */}
+            <div className="table-wrapper card">
               {loading ? (
                 <p className="loading-text">Loading catalog from database...</p>
               ) : products.length === 0 ? (
                 <p className="empty-text">No products match the selected criteria.</p>
               ) : (
                 <>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>SKU</th>
-                        <th>Product Name</th>
-                        <th>Category</th>
-                        <th>Selling Price</th>
-                        <th>Selling GST</th>
-                        <th>Available Stock</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {products.map(p => (
-                        <tr key={p.id} className="clickable-row" onClick={() => setSelectedProduct(p)}>
-                          <td><strong>{p.sku}</strong></td>
-                          <td>{p.name}</td>
-                          <td>{p.category_name}</td>
-                          <td>₹{Number(p.selling_price).toLocaleString()}</td>
-                          <td>{p.has_gst ? `${p.gst_percentage}%` : 'None'}</td>
-                          <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
-                          <td>
-                            <span className={`status-tag ${(p.status || '').toLowerCase().replace(/\s+/g, '-')}`}>
-                              {p.status}
-                            </span>
-                          </td>
+                  <div className="table-scroll-area">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>SKU</th>
+                          <th>Product Name</th>
+                          <th>Brand</th>
+                          <th>Category</th>
+                          <th>Selling Price (MRP)</th>
+                          <th>Tax / HSN</th>
+                          <th>Available Stock</th>
+                          <th>Status</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {products.map(p => (
+                          <tr key={p.id} className="clickable-row" onClick={() => setSelectedProduct(p)}>
+                            <td><strong>{p.sku}</strong></td>
+                            <td>{p.name}</td>
+                            <td>{p.brand_name || '—'}</td>
+                            <td>{p.category_name}</td>
+                            <td>₹{Number(p.selling_price).toLocaleString()}</td>
+                            <td>
+                              {p.has_gst ? (
+                                <span style={{ color: '#0369a1', fontWeight: '500' }}>
+                                  GST ({p.gst_percentage}%) {p.hsn_code ? `| HSN: ${p.hsn_code}` : ''}
+                                </span>
+                              ) : (
+                                <span style={{ color: '#64748b' }}>Estimate</span>
+                              )}
+                            </td>
+                            <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
+                            <td>
+                              <span className={`status-tag ${(p.status || '').toLowerCase().replace(/\s+/g, '-')}`}>
+                                {p.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
 
-                  {/* SERVER-SIDE PAGINATION BAR */}
+                  {/* PAGINATION BAR */}
                   <div className="pagination-bar">
                     <div className="pagination-info">
                       <span>Show:</span>
@@ -669,7 +664,7 @@ export default function ProductsPage() {
                 </>
               )}
             </div>
-          </>
+          </div>
         )}
 
         {/* MODALS */}
@@ -688,9 +683,16 @@ export default function ProductsPage() {
                   <input placeholder="e.g. Basmati Rice 5kg" value={newProd.name} onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} required />
                 </div>
 
-                <div className="form-group">
-                  <label>Category <span className="required">*</span></label>
-                  <input placeholder="e.g. Groceries" value={newProd.category_name} onChange={(e) => setNewProd({ ...newProd, category_name: e.target.value })} required />
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Brand Name</label>
+                    <input placeholder="e.g. Fortune / Samsung" value={newProd.brand_name} onChange={(e) => setNewProd({ ...newProd, brand_name: e.target.value })} />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Category <span className="required">*</span></label>
+                    <input placeholder="e.g. Groceries" value={newProd.category_name} onChange={(e) => setNewProd({ ...newProd, category_name: e.target.value })} required />
+                  </div>
                 </div>
                 
                 <div className="form-row">
@@ -704,46 +706,30 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                {/* PURCHASE GST PANEL */}
-                <div className="form-group" style={{ background: '#fefce8', padding: '12px', borderRadius: '6px', border: '1px solid #fef08a' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', color: '#854d0e' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={newProd.has_purchase_gst} 
-                      onChange={(e) => setNewProd({ ...newProd, has_purchase_gst: e.target.checked })} 
-                      style={{ width: 'auto', margin: 0 }}
-                    />
-                    Purchase Price Includes GST
-                  </label>
-                  
-                  {newProd.has_purchase_gst && (
-                    <div style={{ marginTop: '10px' }}>
-                      <label style={{ fontSize: '12px', color: '#854d0e' }}>Purchase GST Rate (%)</label>
-                      <select 
-                        value={newProd.purchase_gst_percentage} 
-                        onChange={(e) => setNewProd({ ...newProd, purchase_gst_percentage: e.target.value })}
-                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #fde047', marginTop: '4px' }}
-                      >
-                        <option value="0">0%</option>
-                        <option value="5">5%</option>
-                        <option value="12">12%</option>
-                        <option value="18">18%</option>
-                        <option value="28">28%</option>
+                <div className="tax-panel purchase-tax-panel">
+                  <label className="panel-title">Purchase Tax Type</label>
+                  <div className="segmented-control">
+                    <button type="button" className={newProd.purchase_tax_mode === 'estimate' ? 'active' : ''} onClick={() => setNewProd({ ...newProd, purchase_tax_mode: 'estimate' })}>Estimate / Non-GST</button>
+                    <button type="button" className={newProd.purchase_tax_mode === 'gst' ? 'active' : ''} onClick={() => setNewProd({ ...newProd, purchase_tax_mode: 'gst' })}>Tax Invoice (GST)</button>
+                  </div>
+
+                  {newProd.purchase_tax_mode === 'gst' && (
+                    <div className="tax-details">
+                      <label>Purchase GST Rate (%)</label>
+                      <select value={newProd.purchase_gst_percentage} onChange={(e) => setNewProd({ ...newProd, purchase_gst_percentage: e.target.value })}>
+                        <option value="0">0% (Zero-rated)</option>
+                        <option value="5">5% GST</option>
+                        <option value="12">12% GST</option>
+                        <option value="18">18% GST</option>
+                        <option value="28">28% GST</option>
                       </select>
-                      
-                      {Number(newProd.purchase_price) > 0 && (
-                        <div style={{ marginTop: '8px', fontSize: '11px', color: '#a16207', background: '#fef3c7', padding: '6px 8px', borderRadius: '4px' }}>
-                          Base Cost (Excl. Tax): ₹{(Number(newProd.purchase_price) / (1 + Number(newProd.purchase_gst_percentage) / 100)).toFixed(2)} | 
-                          Input GST: ₹{(Number(newProd.purchase_price) - (Number(newProd.purchase_price) / (1 + Number(newProd.purchase_gst_percentage) / 100))).toFixed(2)}
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Selling Price (₹) <span className="required">*</span></label>
+                    <label>Selling Price (MRP) (₹) <span className="required">*</span></label>
                     <input type="number" step="0.01" placeholder="0.00" value={newProd.selling_price} onChange={(e) => handleNewProdPriceChange('selling_price', e.target.value)} required />
                   </div>
                   <div className="form-group">
@@ -752,39 +738,31 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                {/* SELLING GST PANEL */}
-                <div className="form-group" style={{ background: '#f0f9ff', padding: '12px', borderRadius: '6px', border: '1px solid #bae6fd' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', color: '#0369a1' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={newProd.has_gst} 
-                      onChange={(e) => setNewProd({ ...newProd, has_gst: e.target.checked })} 
-                      style={{ width: 'auto', margin: 0 }}
-                    />
-                    Selling Price Includes GST
-                  </label>
-                  
-                  {newProd.has_gst && (
-                    <div style={{ marginTop: '10px' }}>
-                      <label style={{ fontSize: '12px', color: '#0369a1' }}>Selling GST Rate (%)</label>
-                      <select 
-                        value={newProd.gst_percentage} 
-                        onChange={(e) => setNewProd({ ...newProd, gst_percentage: e.target.value })}
-                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #7dd3fc', marginTop: '4px' }}
-                      >
-                        <option value="0">0%</option>
-                        <option value="5">5%</option>
-                        <option value="12">12%</option>
-                        <option value="18">18%</option>
-                        <option value="28">28%</option>
-                      </select>
-                      
-                      {Number(newProd.selling_price) > 0 && (
-                        <div style={{ marginTop: '8px', fontSize: '11px', color: '#0284c7', background: '#e0f2fe', padding: '6px 8px', borderRadius: '4px' }}>
-                          Base Price (Excl. Tax): ₹{(Number(newProd.selling_price) / (1 + Number(newProd.gst_percentage) / 100)).toFixed(2)} | 
-                          Output GST: ₹{(Number(newProd.selling_price) - (Number(newProd.selling_price) / (1 + Number(newProd.gst_percentage) / 100))).toFixed(2)}
+                <div className="tax-panel selling-tax-panel">
+                  <label className="panel-title">Selling Tax Type</label>
+                  <div className="segmented-control">
+                    <button type="button" className={newProd.selling_tax_mode === 'estimate' ? 'active' : ''} onClick={() => setNewProd({ ...newProd, selling_tax_mode: 'estimate' })}>Estimate / Non-GST</button>
+                    <button type="button" className={newProd.selling_tax_mode === 'gst' ? 'active' : ''} onClick={() => setNewProd({ ...newProd, selling_tax_mode: 'gst' })}>Tax Invoice (GST)</button>
+                  </div>
+
+                  {newProd.selling_tax_mode === 'gst' && (
+                    <div className="tax-details">
+                      <div className="form-row" style={{ marginTop: '6px' }}>
+                        <div className="form-group">
+                          <label>HSN Code</label>
+                          <input placeholder="e.g. 1006 / 8517" value={newProd.hsn_code} onChange={(e) => setNewProd({ ...newProd, hsn_code: e.target.value })} />
                         </div>
-                      )}
+                        <div className="form-group">
+                          <label>Selling GST Rate (%)</label>
+                          <select value={newProd.gst_percentage} onChange={(e) => setNewProd({ ...newProd, gst_percentage: e.target.value })}>
+                            <option value="0">0% (Zero-rated)</option>
+                            <option value="5">5% GST</option>
+                            <option value="12">12% GST</option>
+                            <option value="18">18% GST</option>
+                            <option value="28">28% GST</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -812,21 +790,63 @@ export default function ProductsPage() {
         {showEditModal && (
           <div className="modal-overlay">
             <div className="modal">
-              <h3>Edit Price: {selectedProduct.name}</h3>
-              <p className="subtext" style={{ marginBottom: '10px' }}>Current Base Cost Price: ₹{selectedProduct.avg_cost_price}</p>
+              <h3>Edit Product: {selectedProduct.name}</h3>
+              <p className="subtext" style={{ marginBottom: '10px' }}>
+                SKU: <strong>{selectedProduct.sku}</strong> | Already Delivered: <span style={{ color: '#16a34a', fontWeight: 'bold' }}>{selectedProduct.delivered_stock} units</span>
+              </p>
               <form onSubmit={handleUpdateProduct}>
+                <div className="form-group">
+                  <label>Product Name <span className="required">*</span></label>
+                  <input type="text" value={editProd.name} onChange={(e) => setEditProd({ ...editProd, name: e.target.value })} required />
+                </div>
+
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Selling Price (₹) <span className="required">*</span></label>
-                    <input type="number" step="0.01" value={editProd.selling_price} onChange={(e) => handleEditPriceChange('selling_price', e.target.value)} required />
+                    <label>Brand Name</label>
+                    <input type="text" placeholder="Brand..." value={editProd.brand_name} onChange={(e) => setEditProd({ ...editProd, brand_name: e.target.value })} />
                   </div>
                   <div className="form-group">
-                    <label>Margin % <span className="required">*</span></label>
-                    <input type="number" step="0.1" value={editProd.margin_pct} onChange={(e) => handleEditPriceChange('margin_pct', e.target.value)} required />
+                    <label>Category <span className="required">*</span></label>
+                    <input type="text" value={editProd.category_name} onChange={(e) => setEditProd({ ...editProd, category_name: e.target.value })} required />
                   </div>
                 </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>HSN Code</label>
+                    <input type="text" placeholder="HSN..." value={editProd.hsn_code} onChange={(e) => setEditProd({ ...editProd, hsn_code: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Total Stock <span className="required">*</span></label>
+                    <input 
+                      type="number" 
+                      min={selectedProduct.delivered_stock} 
+                      value={editProd.total_stock} 
+                      onChange={(e) => setEditProd({ ...editProd, total_stock: e.target.value })} 
+                      required 
+                    />
+                    <span className="subtext">Cannot be less than delivered ({selectedProduct.delivered_stock})</span>
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Selling Price (MRP) (₹) <span className="required">*</span></label>
+                    <input type="number" step="0.01" value={editProd.selling_price} onChange={(e) => setEditProd({ ...editProd, selling_price: e.target.value })} required />
+                  </div>
+                  <div className="form-group">
+                    <label>Staff Price (₹)</label>
+                    <input type="number" step="0.01" placeholder="Staff tier price..." value={editProd.staff_price} onChange={(e) => setEditProd({ ...editProd, staff_price: e.target.value })} />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Final Price (Lowest Floor Discount) (₹)</label>
+                  <input type="number" step="0.01" placeholder="Absolute final discount price..." value={editProd.final_price} onChange={(e) => setEditProd({ ...editProd, final_price: e.target.value })} />
+                </div>
+
                 <div className="modal-actions">
-                  <button type="submit" className="action-btn">Update Price</button>
+                  <button type="submit" className="action-btn">Save Changes</button>
                   <button type="button" className="cancel-btn" onClick={() => setShowEditModal(false)}>Cancel</button>
                 </div>
               </form>
@@ -870,19 +890,22 @@ export default function ProductsPage() {
       </main>
 
       <style jsx>{`
-        .layout { display: flex; min-height: 100vh; background: #f8fafc; }
-        .content { flex: 1; padding: 24px; box-sizing: border-box; }
+        .layout { display: flex; height: 100vh; overflow: hidden; background: #f8fafc; }
+        .content { flex: 1; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
         @media (max-width: 768px) {
           .content { padding: 16px; padding-bottom: 90px; }
         }
+
+        .products-view-container { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+        .sticky-top-container { flex-shrink: 0; margin-bottom: 16px; }
 
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .primary-btn, .action-btn { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
         .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; }
         .btn-group { display: flex; gap: 10px; }
 
-        .filter-card { background: #ffffff; margin-bottom: 16px; }
+        .filter-card { background: #ffffff; margin-bottom: 0px; }
         .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
         .filter-item { display: flex; flex-direction: column; gap: 4px; }
         .filter-item.flex-2 { grid-column: span 2; }
@@ -900,23 +923,22 @@ export default function ProductsPage() {
         .clear-btn:hover { background: #e2e8f0; }
 
         .loading-text, .empty-text { text-align: center; color: #64748b; padding: 40px 0; }
-        .table-wrapper { background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        
+        .table-wrapper { background: white; border-radius: 8px; border: 1px solid #e2e8f0; flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; margin-top: 0 !important; }
+        .table-scroll-area { flex: 1; overflow: auto; }
+
+        table { width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; font-size: 14px; }
         th, td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; }
-        th { background: #f1f5f9; color: #475569; }
+        th { background: #f1f5f9; color: #475569; position: sticky; top: 0; z-index: 10; }
         .clickable-row { cursor: pointer; transition: background 0.15s; }
         .clickable-row:hover { background: #f8fafc; }
         .subtext { font-size: 12px; color: #94a3b8; }
-        .status-tag { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-        .status-tag.healthy { background: #dcfce7; color: #15803d; }
-        .status-tag.low { background: #fef9c3; color: #a16207; }
-        .status-tag.out-of-stock { background: #fee2e2; color: #b91c1c; }
         .status-tag { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
         .status-tag.healthy { background: #dcfce7; color: #15803d; }
         .status-tag.low { background: #fef9c3; color: #a16207; }
         .status-tag.out-of-stock { background: #fee2e2; color: #b91c1c; }
 
-        .pagination-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-top: 1px solid #e2e8f0; background: #fff; font-size: 13px; flex-wrap: wrap; gap: 10px; }
+        .pagination-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-top: 1px solid #e2e8f0; background: #fff; font-size: 13px; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
         .pagination-info { display: flex; align-items: center; gap: 10px; color: #475569; }
         .page-size-select { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
         .pagination-controls { display: flex; align-items: center; gap: 12px; }
@@ -933,9 +955,11 @@ export default function ProductsPage() {
         .metric .label { font-size: 12px; color: #64748b; }
         .metric .val { font-size: 18px; font-weight: bold; }
         .text-green { color: #16a34a; }
+
         .tabs { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px; }
         .tab { background: none; border: none; padding: 10px 16px; cursor: pointer; color: #64748b; font-weight: 500; border-bottom: 2px solid transparent; }
         .tab.active { color: #0f172a; border-bottom-color: #0f172a; }
+
         .card { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 16px; }
         .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
         .stock-breakdown { display: flex; gap: 16px; margin-top: 12px; }
@@ -943,13 +967,32 @@ export default function ProductsPage() {
         .stock-box.green { background: #f0fdf4; border-color: #bbf7d0; }
         .stock-box .num { display: block; font-size: 24px; font-weight: bold; }
         .stock-box .lbl { font-size: 12px; color: #64748b; }
+
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
         .modal { background: white; padding: 24px; border-radius: 8px; width: 480px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        
         .form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; margin-bottom: 10px; }
         .form-group label { font-size: 13px; font-weight: 600; color: #334155; }
         .required { color: #ef4444; }
-        .modal input { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; width: 100%; }
-        .modal input:focus { outline: none; border-color: #0f172a; }
+
+        .modal input, .tax-details select { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; width: 100%; }
+        .modal input:focus, .tax-details select:focus { outline: none; border-color: #0f172a; }
+        
+        .tax-panel { padding: 12px; border-radius: 6px; margin-bottom: 10px; }
+        .purchase-tax-panel { background: #fefce8; border: 1px solid #fef08a; }
+        .selling-tax-panel { background: #f0f9ff; border: 1px solid #bae6fd; }
+        .panel-title { font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 6px; }
+        
+        .segmented-control { display: flex; background: #e2e8f0; padding: 2px; border-radius: 6px; gap: 2px; }
+        .segmented-control button { flex: 1; padding: 8px; border: none; background: transparent; font-size: 12px; font-weight: 600; color: #64748b; border-radius: 4px; cursor: pointer; transition: all 0.15s ease; }
+        .segmented-control button.active { background: white; color: #0f172a; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+
+        .tax-details { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+        .tax-details label { font-size: 12px; font-weight: 600; color: #475569; }
+        .tax-hint { margin-top: 6px; font-size: 11px; padding: 6px 8px; border-radius: 4px; font-weight: 500; }
+        .purchase-hint { color: #a16207; background: #fef3c7; }
+        .selling-hint { color: #0284c7; background: #e0f2fe; }
+
         .form-row { display: flex; gap: 12px; }
         .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
         .cancel-btn { flex: 1; padding: 10px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }

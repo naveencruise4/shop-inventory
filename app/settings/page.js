@@ -19,7 +19,9 @@ export default function SettingsPage() {
     name: '',
     address: '',
     phone: '',
-    currency: '₹'
+    currency: '₹',
+    has_gst: false,
+    gstin: ''
   });
 
   // Password Update State
@@ -64,7 +66,9 @@ export default function SettingsPage() {
           name: shop.name || '',
           address: shop.address || '',
           phone: shop.phone || '',
-          currency: shop.currency || '₹'
+          currency: shop.currency || '₹',
+          has_gst: shop.has_gst || false,
+          gstin: shop.gstin || ''
         });
       }
     } catch (err) {
@@ -86,153 +90,16 @@ export default function SettingsPage() {
           name: shopData.name,
           address: shopData.address,
           phone: shopData.phone,
-          currency: shopData.currency
+          currency: shopData.currency,
+          has_gst: shopData.has_gst,
+          gstin: shopData.has_gst ? shopData.gstin.trim() : null
         })
         .eq('id', shopId);
 
       if (error) throw error;
       alert('Shop profile updated successfully!');
     } catch (err) {
-      alert(`Failed to update shop details: ${err.message}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleUpdatePassword = async (e) => {
-    e.preventDefault();
-    setPassMessage({ text: '', type: '' });
-
-    if (passwords.newPassword !== passwords.confirmPassword) {
-      setPassMessage({ text: 'New passwords do not match.', type: 'error' });
-      return;
-    }
-
-    if (passwords.newPassword.length < 6) {
-      setPassMessage({ text: 'Password must be at least 6 characters long.', type: 'error' });
-      return;
-    }
-
-    try {
-      const { error } = await supabase.auth.updateUser({
-        password: passwords.newPassword
-      });
-
-      if (error) throw error;
-
-      setPassMessage({ text: 'Password updated successfully!', type: 'success' });
-      setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    } catch (err) {
-      setPassMessage({ text: err.message, type: 'error' });
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push('/login');
-  };
-
-  if (loading) {
-    return (
-      <div className="layout">
-        <Sidebar />
-        <main className="content"><p>Loading account settings...</p></main>
-      </div>
-    );
-  }
-
-  return (
-    <div className="layout">
-      <Sidebar />
-      <main className="content">
-        <div className="top-bar">
-          <h1>Account & Shop Settings</h1>
-        </div>
-
-        <div className="settings-grid">
-          {/* Shop Information Card */}
-          <div className="card">
-            <h3>Shop Profile Configuration</h3>
-            <p className="subtext">Manage your active business name, location, and communication details.</p>
-            
-            <form onSubmit={handleUpdateShop} className="settings-form">
-              <div className="form-group">
-                <label>Shop Name <span className="required">*</span></label>
-                <input 
-                  type="text" 
-                  value={shopData.name} 
-                  onChange={(e) => setShopData({ ...shopData, name: e.target.value })} 
-                  required 
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Business Phone Number</label>
-                <input 
-                  type="text" 
-                  value={shopData.phone} 
-                  onChange={(e) => setShopData({ ...shopData, phone: e.target.value })} 
-                  placeholder="e.g., +91 98765 43210" 
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Shop Address</label>
-                <textarea 
-                  rows="3" 
-                  value={shopData.address} 
-                  onChange={(e) => setShopData({ ...shopData, address: e.target.value })} 
-                  placeholder="Enter complete store address..." 
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Default Currency Symbol <span className="required">*</span></label>
-                <input 
-                  type="text" 
-                  value={shopData.currency} 
-                  onChange={(e) => setShopData({ ...shopData, currency: e.target.value })} 
-                  maxLength="5" 
-                  required 
-                />
-              </div>
-
-              <button type="submit" className="action-btn" disabled={saving}>
-                {saving ? 'Saving Changes...' : 'Save Shop Profile'}
-              </button>
-            </form>
-          </div>
-
-          {/* Login & Security Management Card */}
-          <div className="card">
-            <h3>Login Credentials & Security</h3>
-            <p className="subtext">Signed in as: <strong>{userEmail}</strong></p>
-
-            <form onSubmit={handleUpdatePassword} className="settings-form">
-              <div className="form-group">
-                <label>New Password <span className="required">*</span></label>
-                <input 
-                  type="password" 
-                  value={passwords.newPassword} 
-                  onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })} 
-                  placeholder="Min. 6 characters" 
-                  required 
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Confirm New Password <span className="required">*</span></label>
-                <input 
-                  type="password" 
-                  value={passwords.confirmPassword} 
-                  onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })} 
-                  placeholder="Re-enter new password" 
-                  required 
-                />
-              </div>
-
-              {passMessage.text && (
-                <div className={`message-box ${passMessage.type}`}>
+      alert(`Failed to update shop details: ${err.message}`); } finally { setSaving(false); } };  const handleUpdatePassword = async (e) => { e.preventDefault(); setPassMessage({ text: '', type: '' });  if (passwords.newPassword !== passwords.confirmPassword) { setPassMessage({ text: 'New passwords do not match.', type: 'error' }); return; }  if (passwords.newPassword.length < 6) { setPassMessage({ text: 'Password must be at least 6 characters long.', type: 'error' }); return; }  try { const { error } = await supabase.auth.updateUser({ password: passwords.newPassword });  if (error) throw error;  setPassMessage({ text: 'Password updated successfully!', type: 'success' }); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); } catch (err) { setPassMessage({ text: err.message, type: 'error' }); } };  const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login'); };  if (loading) { return ( <div className="layout"> <Sidebar /> <main className="content"><p>Loading account settings...</p></main> </div> ); }  return ( <div className="layout"> <Sidebar /> <main className="content"> <div className="top-bar"> <h1>Account & Shop Settings</h1> </div>  <div className="settings-grid"> {/* Shop Information Card */} <div className="card"> <h3>Shop Profile Configuration</h3> <p className="subtext">Manage your active business name, location, and communication details.</p>  <form onSubmit={handleUpdateShop} className="settings-form"> <div className="form-group"> <label>Shop Name <span className="required">*</span></label> <input type="text" value={shopData.name} onChange={(e) => setShopData({ ...shopData, name: e.target.value })} required /> </div>  <div className="form-group"> <label>Business Phone Number</label> <input type="text" value={shopData.phone} onChange={(e) => setShopData({ ...shopData, phone: e.target.value })} placeholder="e.g., +91 98765 43210" /> </div>  <div className="form-group"> <label>Shop Address</label> <textarea rows="3" value={shopData.address} onChange={(e) => setShopData({ ...shopData, address: e.target.value })} placeholder="Enter complete store address..." /> </div>  <div className="form-group"> <label>Default Currency Symbol <span className="required">*</span></label> <input type="text" value={shopData.currency} onChange={(e) => setShopData({ ...shopData, currency: e.target.value })} maxLength="5" required /> </div>  {/* GST Configuration Toggles */} <div className="form-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '8px', marginTop: '6px' }}> <input type="checkbox" id="has_gst" checked={shopData.has_gst} onChange={(e) => setShopData({ ...shopData, has_gst: e.target.checked })} style={{ width: '18px', height: '18px', cursor: 'pointer' }} /> <label htmlFor="has_gst" style={{ cursor: 'pointer', fontWeight: 600, color: '#0f172a' }}>Enable GST Billing (Registered Business)</label> </div>  {shopData.has_gst && ( <div className="form-group" style={{ animation: 'fadeIn 0.2s ease-in-out' }}> <label>GSTIN (Goods and Services Tax Identification Number) <span className="required">*</span></label> <input type="text" value={shopData.gstin} onChange={(e) => setShopData({ ...shopData, gstin: e.target.value })} placeholder="e.g., 33AAAAA0000A1Z5" required={shopData.has_gst} /> </div> )}  <button type="submit" className="action-btn" disabled={saving}> {saving ? 'Saving Changes...' : 'Save Shop Profile'} </button> </form> </div>  {/* Login & Security Management Card */} <div className="card"> <h3>Login Credentials & Security</h3> <p className="subtext">Signed in as: <strong>{userEmail}</strong></p>  <form onSubmit={handleUpdatePassword} className="settings-form"> <div className="form-group"> <label>New Password <span className="required">*</span></label> <input type="password" value={passwords.newPassword} onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })} placeholder="Min. 6 characters" required /> </div>  <div className="form-group"> <label>Confirm New Password <span className="required">*</span></label> <input type="password" value={passwords.confirmPassword} onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })} placeholder="Re-enter new password" required /> </div>  {passMessage.text && ( <div className={`message-box ${passMessage.type}`}>
                   {passMessage.text}
                 </div>
               )}
@@ -265,7 +132,7 @@ export default function SettingsPage() {
           padding: 24px; 
           box-sizing: border-box; 
           max-width: 1200px; 
-          padding-bottom: 90px; /* Mobile safe spacing for bottom nav */
+          padding-bottom: 90px;
         }
         .top-bar { margin-bottom: 20px; }
         .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
