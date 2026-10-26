@@ -540,9 +540,8 @@ export default function OrdersPage() {
                           </div>
                           {renderFilterMenu('saleStatus', '', 'select', [
                             {label: 'Completed', value: 'completed'},
-                            {label: 'Pre Order', value: 'pre_order'},
-                            {label: 'Pending', value: 'pending'},
-                            {label: 'Processing', value: 'processing'}
+                            {label: 'Pre Order', value: 'pre_order'}
+                            
                           ])}
                         </th>
                       )}

@@ -51,7 +51,7 @@ export default function POSPage() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [amountPaid, setAmountPaid] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [saleStatus, setSaleStatus] = useState('completed');
+  const [saleStatus, setSaleStatus] = useState('');
 
   // Printable Receipt State
   const [completedGstOrder, setCompletedGstOrder] = useState(null);
@@ -237,6 +237,18 @@ export default function POSPage() {
     fetchSalesman();
   };
 
+  // FIX: Validate stock when switching from Pre-Order to Immediate Sale
+  const handleOrderTypeChange = (newType) => {
+    if (newType === 'sale' && !convertingPreOrder) {
+      const invalidItems = cart.filter(item => Number(item.quantity) > Number(item.available_stock || 0));
+      if (invalidItems.length > 0) {
+        alert(`⚠️ Cannot switch to Immediate Sale. Insufficient physical stock for: ${invalidItems.map(i => i.name).join(', ')}. Please remove them or switch back to Pre-Order.`);
+        return;
+      }
+    }
+    setOrderType(newType);
+  };
+
   const addToCart = (product) => {
     if (orderType === 'sale' && !convertingPreOrder && Number(product.available_stock || 0) <= 0) {
       alert('This product is out of stock for immediate sale!');
@@ -406,26 +418,51 @@ export default function POSPage() {
     setCustomerSearch('');
   };
 
-  const handleLoadPreOrderForConversion = (po) => {
+  const handleLoadPreOrderForConversion = async (po) => {
+    // 1. Extract product IDs from the pre-order items
+    const productIds = po.sale_items.map(si => si.product_id);
+
+    // 2. Query actual stock data from Supabase view
+    const { data: stockData, error } = await supabase
+      .from('vw_product_stock')
+      .select('id, available_stock, total_stock, delivered_stock, unit, booked_stock')
+      .in('id', productIds);
+
+    if (error) {
+      alert(`Error fetching stock details: ${error.message}`);
+      return;
+    }
+
+    // Create a fast lookup map for the stock data
+    const stockMap = new Map(stockData.map(p => [p.id, p]));
+
     setConvertingPreOrder(po);
     setSelectedCustomer(po.customers ? { id: po.customer_id, name: po.customers.name, phone: po.customers.phone } : null);
     if (po.customers) setCustomerSearch(`${po.customers.name} (${po.customers.phone || ''})`);
 
-    const loadedItems = po.sale_items.map(si => ({
-      id: si.product_id,
-      sku: si.sku,
-      name: si.name || si.sku,
-      unit: si.unit || 'Nos',
-      quantity: si.quantity,
-      price: si.unit_price,
-      originalPrice: si.unit_price,
-      has_gst: si.has_gst,
-      gst_percentage: si.gst_percentage,
-      available_stock: 9999
-    }));
+    // 3. Map pre-order items using ACTUAL stock values from the database
+    const loadedItems = po.sale_items.map(si => {
+      const liveStock = stockMap.get(si.product_id);
+      return {
+        id: si.product_id,
+        sku: si.sku,
+        name: si.name || si.sku,
+        unit: si.unit || liveStock?.unit || 'Nos',
+        quantity: si.quantity,
+        price: si.unit_price,
+        originalPrice: si.unit_price,
+        has_gst: si.has_gst,
+        gst_percentage: si.gst_percentage,
+        // 👇 Real database stock metrics instead of 9999
+        available_stock: liveStock ? Number(liveStock.available_stock || 0) : 0,
+        total_stock: liveStock ? Number(liveStock.total_stock || 0) : 0,
+        delivered_stock: liveStock ? Number(liveStock.delivered_stock || 0) : 0,
+        booked_stock: liveStock ? Number(liveStock.booked_stock || 0) : 0
+      };
+    });
 
     setCart(loadedItems);
-    setCustomGrandTotal(''); // 👈 Clear custom lock so cart subtotal calculates dynamically!
+    setCustomGrandTotal('');
     
     const balance = po.total_amount - (po.paid_amount || 0);
     setAmountPaid(balance > 0 ? balance.toString() : '0');
@@ -454,6 +491,68 @@ export default function POSPage() {
 
     try {
       if (!shopInfo.id) return;
+
+      // Only require physical stock when closing an existing pre-order.
+      // Saving a new pre-order or recording a partial payment must remain allowed
+      // even when the stock has not arrived yet.
+      const totalPaidAfterThisPayment = alreadyPaidAdvance + enteredPaid;
+      const isClosingPreOrder = Boolean(
+        convertingPreOrder && totalPaidAfterThisPayment >= finalTotal - 0.01
+      );
+
+      if (isClosingPreOrder) {
+        // Re-fetch current stock immediately before any complete_sale RPC call.
+        // Aggregate quantities by product in case the cart contains duplicates.
+        const requestedByProduct = new Map();
+        for (const item of cart) {
+          const productId = item.id;
+          const quantity = Number(item.quantity);
+          if (!productId || !Number.isFinite(quantity) || quantity <= 0) {
+            alert(`Invalid quantity for ${item.name || 'a cart item'}. Please correct it before closing the pre-order.`);
+            return;
+          }
+          requestedByProduct.set(
+            productId,
+            (requestedByProduct.get(productId) || 0) + quantity
+          );
+        }
+
+        const productIds = [...requestedByProduct.keys()];
+        const { data: liveStock, error: stockError } = await supabase
+          .from('vw_product_stock')
+          .select('id, name, total_stock, delivered_stock, available_stock')
+          .eq('shop_id', shopInfo.id)
+          .in('id', productIds);
+
+        if (stockError) throw new Error(`Could not validate stock before closing the pre-order: ${stockError.message}`);
+
+        const stockById = new Map((liveStock || []).map(product => [product.id, product]));
+        const insufficientItems = [];
+
+        for (const [productId, requestedQty] of requestedByProduct.entries()) {
+          const product = stockById.get(productId);
+          if (!product) {
+            insufficientItems.push(`${cart.find(item => item.id === productId)?.name || productId}: stock record not found`);
+            continue;
+          }
+
+          // Keep consistent with the existing pre-order fulfillment checks in this page.
+          // This assumes total_stock is the stock quantity against which delivered_stock is deducted.
+          const physicalHeadroom = Number(product.total_stock || 0) - Number(product.delivered_stock || 0);
+          if (requestedQty > physicalHeadroom + 0.0001) {
+            insufficientItems.push(
+              `${product.name || cart.find(item => item.id === productId)?.name || productId}: requested ${requestedQty}, physically available ${Math.max(0, physicalHeadroom)}`
+            );
+          }
+        }
+
+        if (insufficientItems.length > 0) {
+          alert(
+            `Cannot close this pre-order because there is insufficient physical stock for:\n\n${insufficientItems.join('\n')}\n\nThe pre-order will remain open. Receive the missing stock before completing fulfillment.`
+          );
+          return;
+        }
+      }
 
       let createdGstOrder = null;
       let createdEstimateOrder = null;
@@ -488,7 +587,9 @@ export default function POSPage() {
         if (convertingPreOrder) {
           totalPaidSoFar = alreadyPaidAdvance + enteredPaid;
           if (totalPaidSoFar < finalTotal) finalStatus = 'pre_order';
-          else finalStatus = 'completed';
+          else {
+            finalStatus = 'completed';
+          }
         }
 
         const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
@@ -771,10 +872,10 @@ export default function POSPage() {
               {/* Workflow Mode Selector */}
               {!convertingPreOrder && (
                 <div className="segmented-control" style={{ marginBottom: '12px' }}>
-                  <button type="button" className={orderType === 'sale' ? 'active' : ''} onClick={() => setOrderType('sale')}>
+                  <button type="button" className={orderType === 'sale' ? 'active' : ''} onClick={() => handleOrderTypeChange('sale')}>
                     🛒 Immediate Direct Sale
                   </button>
-                  <button type="button" className={orderType === 'pre_order' ? 'active' : ''} onClick={() => setOrderType('pre_order')}>
+                  <button type="button" className={orderType === 'pre_order' ? 'active' : ''} onClick={() => handleOrderTypeChange('pre_order')}>
                     ⏳ Pre-Order (Advance Deposit)
                   </button>
                 </div>
