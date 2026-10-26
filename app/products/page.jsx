@@ -28,6 +28,10 @@ export default function ProductsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRestockModal, setShowRestockModal] = useState(false);
+  
+  // Purchase Edit Modal State
+  const [showEditPurchaseModal, setShowEditPurchaseModal] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState({ id: '', quantity: '', purchase_price: '', purchase_date: '', supplier_name: '' });
 
   // Forms State
   const [newProd, setNewProd] = useState({
@@ -48,13 +52,12 @@ export default function ProductsPage() {
     gst_percentage: '18'
   });
 
-  // Extended Edit Form State: Separating MRP (selling_price), staff_price, and final_price
+  // General Product Edit Form State (Excluding Total Stock)
   const [editProd, setEditProd] = useState({
     name: '',
     brand_name: '',
     category_name: '',
     hsn_code: '',
-    total_stock: '',
     selling_price: '',
     staff_price: '',
     final_price: ''
@@ -166,22 +169,31 @@ export default function ProductsPage() {
   };
 
   const fetchPurchaseHistory = async (productId) => {
-    const { data } = await supabase
-      .from('product_purchases')
-      .select('*')
-      .eq('product_id', productId)
-      .order('purchase_date', { ascending: false });
-    if (data) setPurchasesHistory(data);
-  };
+      const { data } = await supabase
+        .from('product_purchases')
+        .select('*')
+        .eq('product_id', productId)
+        .order('purchase_date', { ascending: false }) // 👈 Ensures latest purchase dates come first
+        .order('created_at', { ascending: false });   // 👈 Secondary sort by creation time if dates match
+      if (data) setPurchasesHistory(data);
+    };
 
-  const fetchSalesHistory = async (sku) => {
-    const { data } = await supabase
-      .from('sale_items')
-      .select('*, sales(created_at, sale_status, customer_id, customers(name))')
-      .eq('sku', sku)
-      .order('created_at', { ascending: false });
-    if (data) setSalesHistory(data);
-  };
+    const fetchSalesHistory = async (sku) => {
+        const { data } = await supabase
+          .from('sale_items')
+          .select('*, sales(created_at, sale_status, customer_id, customers(name))')
+          .eq('sku', sku);
+          
+        // Sort sales in memory or via query by sales.created_at descending so newest are on top
+        if (data) {
+          const sortedSales = data.sort((a, b) => {
+            const dateA = new Date(a.sales?.created_at || 0);
+            const dateB = new Date(b.sales?.created_at || 0);
+            return dateB - dateA; // Descending order (latest first)
+          });
+          setSalesHistory(sortedSales);
+        }
+      };
 
   const totalPages = useMemo(() => {
     return Math.ceil(totalCount / pageSize) || 1;
@@ -263,26 +275,12 @@ export default function ProductsPage() {
     e.preventDefault();
     if (!selectedProduct) return;
 
-    const newTotalStock = Number(editProd.total_stock);
-    const deliveredStock = Number(selectedProduct.delivered_stock || 0);
-
-    // Validation: Total stock cannot be less than delivered stock
-    if (newTotalStock < deliveredStock) {
-      alert(`⚠️ Total stock cannot be less than delivered stock (${deliveredStock} units already fulfilled in orders).`);
-      return;
-    }
-
-    const diffStock = newTotalStock - Number(selectedProduct.total_stock);
-    const updatedAvailableStock = Number(selectedProduct.available_stock) + diffStock;
-
     const { error } = await supabase.from('productsinfo').update({
       name: editProd.name.trim(),
       brand_name: editProd.brand_name?.trim() || null,
       category_name: editProd.category_name.trim(),
       hsn_code: editProd.hsn_code?.trim() || null,
-      total_stock: newTotalStock,
-      stock_quantity: updatedAvailableStock,
-      selling_price: Number(editProd.selling_price), // MRP
+      selling_price: Number(editProd.selling_price),
       staff_price: editProd.staff_price !== '' ? Number(editProd.staff_price) : null,
       final_price: editProd.final_price !== '' ? Number(editProd.final_price) : null
     }).eq('id', selectedProduct.id);
@@ -293,6 +291,64 @@ export default function ProductsPage() {
     }
 
     setShowEditModal(false);
+    const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
+    if (updated) setSelectedProduct(updated);
+    fetchProducts();
+  };
+
+  const handleUpdatePurchaseBatch = async (e) => {
+    e.preventDefault();
+    if (!editingPurchase.id || !selectedProduct) return;
+
+    const newEditingQty = Number(editingPurchase.quantity);
+    const deliveredStock = Number(selectedProduct.delivered_stock || 0);
+
+    // 1. Calculate the new total stock across ALL purchase batches combined
+    const projectedTotalStock = purchasesHistory.reduce((sum, p) => {
+      if (p.id === editingPurchase.id) {
+        return sum + newEditingQty; // use the newly proposed quantity for this batch
+      }
+      return sum + Number(p.quantity); // keep existing quantities for other batches
+    }, 0);
+
+    // 2. Validation: Combined total stock of all batches cannot be less than delivered stock
+    if (projectedTotalStock < deliveredStock) {
+      alert(`⚠️ Resulting total stock across all purchase batches (${projectedTotalStock}) cannot be less than delivered stock (${deliveredStock} units already fulfilled in orders).`);
+      return;
+    }
+
+    const oldQty = Number(purchasesHistory.find(p => p.id === editingPurchase.id)?.quantity || 0);
+    const diffQty = newEditingQty - oldQty;
+
+    // 3. Update the specific product_purchase row
+    const { error: purchaseErr } = await supabase.from('product_purchases').update({
+      quantity: newEditingQty,
+      purchase_price: Number(editingPurchase.purchase_price),
+      purchase_date: editingPurchase.purchase_date,
+      supplier_name: editingPurchase.supplier_name?.trim() || null
+    }).eq('id', editingPurchase.id);
+
+    if (purchaseErr) {
+      alert(`Error updating purchase batch: ${purchaseErr.message}`);
+      return;
+    }
+
+    // 4. Update productsinfo total stock and available stock aggregates
+    const updatedAvailableStock = Number(selectedProduct.available_stock) + diffQty;
+
+    const { error: prodErr } = await supabase.from('productsinfo').update({
+      total_stock: projectedTotalStock,
+      stock_quantity: Math.max(0, updatedAvailableStock)
+    }).eq('id', selectedProduct.id);
+
+    if (prodErr) {
+      alert(`Error updating product stock aggregates: ${prodErr.message}`);
+      return;
+    }
+
+    setShowEditPurchaseModal(false);
+    fetchPurchaseHistory(selectedProduct.id);
+    
     const { data: updated } = await supabase.from('vw_product_stock').select('*').eq('id', selectedProduct.id).single();
     if (updated) setSelectedProduct(updated);
     fetchProducts();
@@ -377,7 +433,6 @@ export default function ProductsPage() {
                       brand_name: selectedProduct.brand_name || '',
                       category_name: selectedProduct.category_name || '',
                       hsn_code: selectedProduct.hsn_code || '',
-                      total_stock: selectedProduct.total_stock || 0,
                       selling_price: selectedProduct.selling_price || 0,
                       staff_price: selectedProduct.staff_price ?? '',
                       final_price: selectedProduct.final_price ?? ''
@@ -392,11 +447,6 @@ export default function ProductsPage() {
                 <div className="metric">
                   <span className="label">Selling Price (MRP)</span>
                   <span className="val">₹{Number(selectedProduct.selling_price).toLocaleString()}</span>
-                  {selectedProduct.has_gst && (
-                    <span className="subtext">
-                      Base: ₹{(selectedProduct.selling_price / (1 + selectedProduct.gst_percentage / 100)).toFixed(2)}
-                    </span>
-                  )}
                 </div>
                 <div className="metric">
                   <span className="label">Staff Price</span>
@@ -409,6 +459,10 @@ export default function ProductsPage() {
                 <div className="metric">
                   <span className="label">Total Stock</span>
                   <span className="val">{selectedProduct.total_stock}</span>
+                </div>
+                <div className="metric">
+                  <span className="label">Booked (Pre-Orders)</span>
+                  <span className="val text-orange">{selectedProduct.booked_stock || 0}</span>
                 </div>
                 <div className="metric">
                   <span className="label">Available</span>
@@ -440,7 +494,7 @@ export default function ProductsPage() {
                   </div>
                   <div className="card">
                     <h4>Pricing & Cost Breakdown</h4>
-                     <p><strong>Selling Price (MRP):</strong> ₹{Number(selectedProduct.selling_price).toFixed(2)}</p>
+                    <p><strong>Selling Price (MRP):</strong> ₹{Number(selectedProduct.selling_price).toFixed(2)}</p>
                     <p><strong>Staff Price:</strong> ₹{selectedProduct.staff_price ? Number(selectedProduct.staff_price).toFixed(2) : '—'}</p>
                     <p><strong>Final Price:</strong> <span style={{ color: '#16a34a', fontWeight: 'bold' }}>₹{selectedProduct.final_price ? Number(selectedProduct.final_price).toFixed(2) : '—'}</span></p>
                     {latestPurchaseCost > 0 && selectedProduct.selling_price > 0 && (
@@ -458,12 +512,16 @@ export default function ProductsPage() {
                 <div className="card">
                   <h4>Stock Breakdown & Fulfillment Logic</h4>
                   <p className="subtext" style={{ marginBottom: '16px' }}>
-                    Items stay in <strong>Delivered</strong> status while orders are Pending or Confirmed. Once an order is marked as <strong>Delivered/Completed</strong>, the stock is officially finalized and deducted from total physical inventory.
+                    Tracking physical stock, booked pre-orders, and delivered inventory.
                   </p>
                   <div className="stock-breakdown">
                     <div className="stock-box">
                       <span className="num">{selectedProduct.total_stock}</span>
                       <span className="lbl">Physical On Hand</span>
+                    </div>
+                    <div className="stock-box orange">
+                      <span className="num">{selectedProduct.booked_stock || 0}</span>
+                      <span className="lbl">Booked (Pre-Orders)</span>
                     </div>
                     <div className="stock-box green">
                       <span className="num">{selectedProduct.delivered_stock}</span>
@@ -479,19 +537,34 @@ export default function ProductsPage() {
 
               {activeTab === 'purchases' && (
                 <div className="card">
-                  <h4>Restock & Purchase Batches</h4>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <h4>Restock & Purchase Batches (Editable)</h4>
+                    <span className="subtext">Click Edit on any batch to correct date, quantity, or price.</span>
+                  </div>
                   <table>
                     <thead>
-                      <tr><th>Date</th><th>Supplier</th><th>Qty</th><th>Cost/Unit</th><th>Total</th></tr>
+                      <tr><th>Date</th><th>Supplier</th><th>Qty</th><th>Cost/Unit</th><th>Total</th><th>Action</th></tr>
                     </thead>
                     <tbody>
                       {purchasesHistory.map(p => (
                         <tr key={p.id}>
                           <td>{p.purchase_date}</td>
                           <td>{p.supplier_name || 'N/A'}</td>
-                          <td>{p.quantity}</td>
+                          <td><strong>{p.quantity}</strong></td>
                           <td>₹{p.purchase_price}</td>
                           <td>₹{(p.quantity * p.purchase_price).toFixed(2)}</td>
+                          <td>
+                            <button className="secondary-btn" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => {
+                              setEditingPurchase({
+                                id: p.id,
+                                quantity: p.quantity,
+                                purchase_price: p.purchase_price,
+                                purchase_date: p.purchase_date,
+                                supplier_name: p.supplier_name || ''
+                              });
+                              setShowEditPurchaseModal(true);
+                            }}>✎ Edit Batch</button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -573,7 +646,7 @@ export default function ProductsPage() {
               </div>
             </div>
 
-            {/* PRODUCTS TABLE CONTAINER WITH INNER SCROLL */}
+            {/* PRODUCTS TABLE CONTAINER WITH INNER SCROLL & BOOKED COLUMN */}
             <div className="table-wrapper card">
               {loading ? (
                 <p className="loading-text">Loading catalog from database...</p>
@@ -589,8 +662,9 @@ export default function ProductsPage() {
                           <th>Product Name</th>
                           <th>Brand</th>
                           <th>Category</th>
-                          <th>Selling Price (MRP)</th>
+                          <th>Selling Price</th>
                           <th>Tax / HSN</th>
+                          <th>Booked (Pre-Orders)</th>
                           <th>Available Stock</th>
                           <th>Status</th>
                         </tr>
@@ -611,6 +685,11 @@ export default function ProductsPage() {
                               ) : (
                                 <span style={{ color: '#64748b' }}>Estimate</span>
                               )}
+                            </td>
+                            <td>
+                              <span style={{ color: p.booked_stock > 0 ? '#d97706' : '#64748b', fontWeight: p.booked_stock > 0 ? 'bold' : 'normal' }}>
+                                {p.booked_stock || 0} units
+                              </span>
                             </td>
                             <td><strong>{p.available_stock}</strong> <span className="subtext">({p.total_stock} total)</span></td>
                             <td>
@@ -787,12 +866,13 @@ export default function ProductsPage() {
           </div>
         )}
 
+        {/* Edit Product Modal (Excluding Total Stock) */}
         {showEditModal && (
           <div className="modal-overlay">
             <div className="modal">
               <h3>Edit Product: {selectedProduct.name}</h3>
               <p className="subtext" style={{ marginBottom: '10px' }}>
-                SKU: <strong>{selectedProduct.sku}</strong> | Already Delivered: <span style={{ color: '#16a34a', fontWeight: 'bold' }}>{selectedProduct.delivered_stock} units</span>
+                SKU: <strong>{selectedProduct.sku}</strong> | Total Stock: <strong>{selectedProduct.total_stock}</strong> (Manage via Purchases tab)
               </p>
               <form onSubmit={handleUpdateProduct}>
                 <div className="form-group">
@@ -811,22 +891,9 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>HSN Code</label>
-                    <input type="text" placeholder="HSN..." value={editProd.hsn_code} onChange={(e) => setEditProd({ ...editProd, hsn_code: e.target.value })} />
-                  </div>
-                  <div className="form-group">
-                    <label>Total Stock <span className="required">*</span></label>
-                    <input 
-                      type="number" 
-                      min={selectedProduct.delivered_stock} 
-                      value={editProd.total_stock} 
-                      onChange={(e) => setEditProd({ ...editProd, total_stock: e.target.value })} 
-                      required 
-                    />
-                    <span className="subtext">Cannot be less than delivered ({selectedProduct.delivered_stock})</span>
-                  </div>
+                <div className="form-group">
+                  <label>HSN Code</label>
+                  <input type="text" placeholder="HSN..." value={editProd.hsn_code} onChange={(e) => setEditProd({ ...editProd, hsn_code: e.target.value })} />
                 </div>
 
                 <div className="form-row">
@@ -848,6 +915,42 @@ export default function ProductsPage() {
                 <div className="modal-actions">
                   <button type="submit" className="action-btn">Save Changes</button>
                   <button type="button" className="cancel-btn" onClick={() => setShowEditModal(false)}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Purchase Batch Modal */}
+        {showEditPurchaseModal && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Edit Purchase Batch Entry</h3>
+              <form onSubmit={handleUpdatePurchaseBatch}>
+                <div className="form-group">
+                  <label>Purchase Date <span className="required">*</span></label>
+                  <input type="date" value={editingPurchase.purchase_date} onChange={(e) => setEditingPurchase({ ...editingPurchase, purchase_date: e.target.value })} required />
+                </div>
+
+                <div className="form-group">
+                  <label>Supplier Name</label>
+                  <input type="text" value={editingPurchase.supplier_name} onChange={(e) => setEditingPurchase({ ...editingPurchase, supplier_name: e.target.value })} />
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Quantity <span className="required">*</span></label>
+                    <input type="number" step="0.001" value={editingPurchase.quantity} onChange={(e) => setEditingPurchase({ ...editingPurchase, quantity: e.target.value })} required />
+                  </div>
+                  <div className="form-group">
+                    <label>Purchase Price per Unit (₹) <span className="required">*</span></label>
+                    <input type="number" step="0.01" value={editingPurchase.purchase_price} onChange={(e) => setEditingPurchase({ ...editingPurchase, purchase_price: e.target.value })} required />
+                  </div>
+                </div>
+
+                <div className="modal-actions">
+                  <button type="submit" className="action-btn">Update Batch & Stock</button>
+                  <button type="button" className="cancel-btn" onClick={() => setShowEditPurchaseModal(false)}>Cancel</button>
                 </div>
               </form>
             </div>
@@ -955,6 +1058,7 @@ export default function ProductsPage() {
         .metric .label { font-size: 12px; color: #64748b; }
         .metric .val { font-size: 18px; font-weight: bold; }
         .text-green { color: #16a34a; }
+        .text-orange { color: #d97706; }
 
         .tabs { display: flex; gap: 8px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px; }
         .tab { background: none; border: none; padding: 10px 16px; cursor: pointer; color: #64748b; font-weight: 500; border-bottom: 2px solid transparent; }
@@ -965,6 +1069,7 @@ export default function ProductsPage() {
         .stock-breakdown { display: flex; gap: 16px; margin-top: 12px; }
         .stock-box { flex: 1; padding: 16px; background: #f8fafc; border-radius: 6px; text-align: center; border: 1px solid #e2e8f0; }
         .stock-box.green { background: #f0fdf4; border-color: #bbf7d0; }
+        .stock-box.orange { background: #fffbeb; border-color: #fde68a; }
         .stock-box .num { display: block; font-size: 24px; font-weight: bold; }
         .stock-box .lbl { font-size: 12px; color: #64748b; }
 
@@ -989,9 +1094,6 @@ export default function ProductsPage() {
 
         .tax-details { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
         .tax-details label { font-size: 12px; font-weight: 600; color: #475569; }
-        .tax-hint { margin-top: 6px; font-size: 11px; padding: 6px 8px; border-radius: 4px; font-weight: 500; }
-        .purchase-hint { color: #a16207; background: #fef3c7; }
-        .selling-hint { color: #0284c7; background: #e0f2fe; }
 
         .form-row { display: flex; gap: 12px; }
         .modal-actions { display: flex; gap: 10px; margin-top: 10px; }

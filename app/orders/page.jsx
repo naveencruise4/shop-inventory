@@ -35,7 +35,7 @@ export default function OrdersPage() {
     saleStatus: true,
     paymentStatus: true,
     orderStatus: true,
-    paymentMethod: true,
+  //  paymentMethod: true,
     breakdown: true,
     actions: true
   });

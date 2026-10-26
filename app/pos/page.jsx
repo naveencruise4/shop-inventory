@@ -46,7 +46,7 @@ export default function POSPage() {
   const dropdownRef = useRef(null);
   const customerDropdownRef = useRef(null);
   const salesmanDropdownRef = useRef(null);
-  const cartScrollRef = useRef(null); // Enhancement 1: Ref for auto-scrolling cart box
+  const cartScrollRef = useRef(null);
 
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [amountPaid, setAmountPaid] = useState('');
@@ -71,7 +71,6 @@ export default function POSPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Enhancement 1: Auto-scroll cart box to bottom when items are added or updated
   useEffect(() => {
     if (cartScrollRef.current) {
       cartScrollRef.current.scrollTop = cartScrollRef.current.scrollHeight;
@@ -239,9 +238,19 @@ export default function POSPage() {
   };
 
   const addToCart = (product) => {
-    if (product.available_stock <= 0) {
-      alert('This product is out of stock!');
+    if (orderType === 'sale' && !convertingPreOrder && Number(product.available_stock || 0) <= 0) {
+      alert('This product is out of stock for immediate sale!');
       return;
+    }
+
+    if (convertingPreOrder) {
+      const totalStock = Number(product.total_stock || 0);
+      const deliveredStock = Number(product.delivered_stock || 0);
+      const physicalHeadroom = totalStock - deliveredStock;
+      if (physicalHeadroom <= 0) {
+        alert('Cannot fulfill pre-order: No physical stock available (Total Stock <= Delivered Stock). Please receive supplier stock first.');
+        return;
+      }
     }
 
     const hasGst = product.has_gst ?? false;
@@ -253,10 +262,22 @@ export default function POSPage() {
     if (existingIndex > -1) {
       const updatedCart = [...cart];
       const nextQty = updatedCart[existingIndex].quantity + defaultQty;
-      if (!convertingPreOrder && nextQty > product.available_stock) {
+      
+      if (orderType === 'sale' && !convertingPreOrder && nextQty > Number(product.available_stock || 0)) {
         alert(`Cannot add more. Only ${product.available_stock} units available.`);
         return;
       }
+
+      if (convertingPreOrder) {
+        const totalStock = Number(product.total_stock || 0);
+        const deliveredStock = Number(product.delivered_stock || 0);
+        const physicalHeadroom = totalStock - deliveredStock;
+        if (nextQty > physicalHeadroom) {
+          alert(`Cannot fulfill more than available physical stock headroom (${physicalHeadroom} units).`);
+          return;
+        }
+      }
+
       updatedCart[existingIndex].quantity = nextQty;
       setCart(updatedCart);
     } else {
@@ -275,7 +296,6 @@ export default function POSPage() {
     setShowDropdown(false);
   };
 
-  // Enhancement 2: Quantity handling for Kgs vs Nos
   const updateCartQuantity = (id, delta) => {
     setCart(cart.map(item => {
       if (item.id === id) {
@@ -283,10 +303,21 @@ export default function POSPage() {
         const step = isKgs ? 0.5 : 1;
         const newQty = Number((item.quantity + (delta * step)).toFixed(3));
 
-        if (!convertingPreOrder && newQty > item.available_stock) {
+        if (orderType === 'sale' && !convertingPreOrder && newQty > Number(item.available_stock || 0)) {
           alert(`Only ${item.available_stock} units available in stock.`);
           return item;
         }
+
+        if (convertingPreOrder) {
+          const totalStock = Number(item.total_stock || 0);
+          const deliveredStock = Number(item.delivered_stock || 0);
+          const physicalHeadroom = totalStock - deliveredStock;
+          if (newQty > physicalHeadroom) {
+            alert(`Only ${physicalHeadroom} units of physical stock available for fulfillment.`);
+            return item;
+          }
+        }
+
         return newQty > 0 ? { ...item, quantity: newQty } : null;
       }
       return item;
@@ -298,10 +329,21 @@ export default function POSPage() {
     setCart(cart.map(item => {
       if (item.id === id) {
         const newQty = isNaN(parsed) ? 0 : parsed;
-        if (!convertingPreOrder && newQty > item.available_stock) {
+        if (orderType === 'sale' && !convertingPreOrder && newQty > Number(item.available_stock || 0)) {
           alert(`Only ${item.available_stock} units available in stock.`);
           return { ...item, quantity: Number(item.available_stock) };
         }
+
+        if (convertingPreOrder) {
+          const totalStock = Number(item.total_stock || 0);
+          const deliveredStock = Number(item.delivered_stock || 0);
+          const physicalHeadroom = totalStock - deliveredStock;
+          if (newQty > physicalHeadroom) {
+            alert(`Only ${physicalHeadroom} units of physical stock available for fulfillment.`);
+            return { ...item, quantity: physicalHeadroom };
+          }
+        }
+
         return { ...item, quantity: newQty };
       }
       return item;
@@ -344,7 +386,8 @@ export default function POSPage() {
 
   const getFinalTotal = () => {
     const custom = Number(customGrandTotal);
-    return (!isNaN(custom) && custom > 0) ? custom : calculateCurrentSubtotal();
+    const subtotal = (!isNaN(custom) && custom > 0) ? custom : calculateCurrentSubtotal();
+    return Math.ceil(subtotal); // 👈 Rounds up final total to nearest whole integer
   };
 
   // Pre-Order Calculations
@@ -382,7 +425,7 @@ export default function POSPage() {
     }));
 
     setCart(loadedItems);
-    setCustomGrandTotal(po.total_amount);
+    setCustomGrandTotal(''); // 👈 Clear custom lock so cart subtotal calculates dynamically!
     
     const balance = po.total_amount - (po.paid_amount || 0);
     setAmountPaid(balance > 0 ? balance.toString() : '0');
@@ -492,21 +535,26 @@ export default function POSPage() {
           else estimateCartItems.push(item);
         });
 
-        const gstTotal = gstCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
-        const estimateTotal = estimateCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
-        const grandCartTotal = gstTotal + estimateTotal;
+        const gstTotalRaw = gstCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+        const estimateTotalRaw = estimateCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+        const grandCartTotalRaw = gstTotalRaw + estimateTotalRaw;
 
-        const gstRatio = grandCartTotal > 0 ? gstTotal / grandCartTotal : 0;
-        const estRatio = grandCartTotal > 0 ? estimateTotal / grandCartTotal : 0;
+        // 1. Scale sub-totals to match the rounded finalTotal integer precisely
+        const scaleFactor = grandCartTotalRaw > 0 ? finalTotal / grandCartTotalRaw : 1;
+        const gstTotal = Math.round(gstTotalRaw * scaleFactor);
+        const estimateTotal = finalTotal - gstTotal; // guarantees exact sum === finalTotal
 
-        const totalOverallPaidSoFar = convertingPreOrder ? alreadyPaidAdvance + enteredPaid : enteredPaid;
+        const totalOverallPaidSoFar = convertingPreOrder ? alreadyPaidAdvance + enteredPaid : finalTotal;
         const totalOverallAdvance = convertingPreOrder ? alreadyPaidAdvance : 0;
 
+        const gstRatio = grandCartTotalRaw > 0 ? gstTotalRaw / grandCartTotalRaw : 0;
+
+        // 2. Allocate exact proportional paid amounts matching each batch total exactly
         const gstPaidAllocated = Number((totalOverallPaidSoFar * gstRatio).toFixed(2));
-        const estPaidAllocated = Number((totalOverallPaidSoFar * estRatio).toFixed(2));
+        const estPaidAllocated = Number((totalOverallPaidSoFar - gstPaidAllocated).toFixed(2));
 
         const gstAdvanceAllocated = Number((totalOverallAdvance * gstRatio).toFixed(2));
-        const estAdvanceAllocated = Number((totalOverallAdvance * estRatio).toFixed(2));
+        const estAdvanceAllocated = Number((totalOverallAdvance - gstAdvanceAllocated).toFixed(2));
 
         const submitOrderBatch = async (items, batchTotal, allocatedPaid, allocatedAdvance, isGstBatch, existingId) => {
           if (items.length === 0) return null;
@@ -534,10 +582,16 @@ export default function POSPage() {
             };
           });
 
+          // Ensure both split invoices show as fully completed and paid for direct sales
           let finalStatus = saleStatus;
-          if (convertingPreOrder && allocatedPaid < batchTotal) finalStatus = 'pre_order';
+          let paymentForThisBatch = batchTotal; // Force batch to match its full total so paid == total
 
-          const paymentForThisBatch = existingId ? (allocatedPaid - allocatedAdvance) : allocatedPaid;
+          if (convertingPreOrder) {
+            if (allocatedPaid < batchTotal) finalStatus = 'pre_order';
+            paymentForThisBatch = existingId ? (allocatedPaid - allocatedAdvance) : allocatedPaid;
+          } else {
+            finalStatus = 'completed';
+          }
 
           const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
             p_shop_id: shopInfo.id,
@@ -563,7 +617,7 @@ export default function POSPage() {
             salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
             items: itemsPayload,
             totalAmount: batchTotal,
-            paidAmount: allocatedPaid,
+            paidAmount: batchTotal,
             paymentMethod,
             totalBase,
             totalGst,
@@ -572,7 +626,7 @@ export default function POSPage() {
           };
         };
 
-        if (gstCartItems.length > 0) {
+        if (gstCartItems.length > 0 && gstTotal > 0) {
           createdGstOrder = await submitOrderBatch(
             gstCartItems, 
             gstTotal, 
@@ -583,7 +637,7 @@ export default function POSPage() {
           );
         }
 
-        if (estimateCartItems.length > 0) {
+        if (estimateCartItems.length > 0 && estimateTotal > 0) {
           createdEstimateOrder = await submitOrderBatch(
             estimateCartItems, 
             estimateTotal, 
@@ -685,7 +739,6 @@ export default function POSPage() {
                 )}
               </div>
 
-              {/* Enhancement 3: Quick Catalog showing only products with stock > 0 */}
               <h4>Quick Catalog (In-Stock)</h4>
               <div className="quick-grid">
                 {products
@@ -817,7 +870,6 @@ export default function POSPage() {
                 </div>
               </div>
 
-              {/* Enhancement 1: Cart Items Wrapper attached with cartScrollRef */}
               <div className="cart-items-wrapper" ref={cartScrollRef}>
                 {cart.length === 0 ? (
                   <p className="empty-cart-text">Cart is empty. Search or click products to add.</p>
@@ -854,7 +906,6 @@ export default function POSPage() {
                               </div>
                             </td>
                             <td>
-                              {/* Enhancement 2: Quantity controls supporting decimal input for Kgs */}
                               <div className="qty-controls">
                                 <button onClick={() => updateCartQuantity(item.id, -1)}>-</button>
                                 <input
@@ -904,7 +955,7 @@ export default function POSPage() {
                   <div className="preorder-ledger-card">
                     <div className="summary-row">
                       <span>Updated Cart Total:</span>
-                      <strong>₹{finalTotal.toFixed(2)}</strong>
+                      <strong>₹{finalTotal.toLocaleString('en-IN')}</strong>
                     </div>
                     <div className="summary-row text-blue">
                       <span>Advance Received So Far:</span>
@@ -961,20 +1012,9 @@ export default function POSPage() {
                   </select>
                 </div>
 
-                {!convertingPreOrder && (
-                  <div className="summary-row">
-                    <span>Fulfillment Status:</span>
-                    <select value={saleStatus} onChange={(e) => setSaleStatus(e.target.value)} className="custom-total-input" style={{ width: '150px' }}>
-                      <option value="completed">Delivered / Completed</option>
-                      <option value="pending">Pending</option>
-                      <option value="processing">Processing</option>
-                    </select>
-                  </div>
-                )}
-
                 <div className="total-row">
                   <span>Final Payable Amount:</span>
-                  <span className="grand-total">₹{finalTotal.toFixed(2)}</span>
+                  <span className="grand-total">₹{finalTotal.toLocaleString('en-IN')}</span>
                 </div>
 
                 <button className="checkout-btn" disabled={cart.length === 0 || isCheckingOut} onClick={handleCheckout}>
