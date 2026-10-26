@@ -24,6 +24,24 @@ export default function OrdersPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
+  // Column Visibility Toggle State
+  const [showColumnSelector, setShowColumnSelector] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState({
+    orderId: true,
+    date: true,
+    customer: true,
+    salesRep: true,
+    type: true,
+    saleStatus: true,
+    paymentStatus: true,
+    orderStatus: true,
+    paymentMethod: true,
+    breakdown: true,
+    actions: true
+  });
+
+  const columnSelectorRef = useRef(null);
+
   // Default Date Range: Start of current month to Today
   const getInitialDates = () => {
     const today = new Date();
@@ -42,33 +60,33 @@ export default function OrdersPage() {
     return { start: formatDate(firstDay), end: formatDate(today) };
   };
 
-  // UI Input State (Typing values)
   const [colFilters, setColFilters] = useState({
     orderId: '',
     customer: '',
     salesRep: '',
     type: '',
-    status: ''
+    saleStatus: '',
+    paymentStatus: '',
+    orderStatus: ''
   });
   const [dateRange, setDateRange] = useState(getInitialDates());
 
-  // Applied Query State (Updated ONLY on Enter key or dropdown selection)
   const [appliedFilters, setAppliedFilters] = useState(colFilters);
   const [appliedDates, setAppliedDates] = useState(dateRange);
 
-  // Active open filter dropdown state
   const [activeFilterCol, setActiveFilterCol] = useState(null);
   const filterDropdownRef = useRef(null);
 
-  // Print Receipt Modal State
   const [selectedOrderForPrint, setSelectedOrderForPrint] = useState(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (filterDropdownRef.current && !filterDropdownRef.current.contains(e.target)) {
         setActiveFilterCol(null);
+      }
+      if (columnSelectorRef.current && !columnSelectorRef.current.contains(e.target)) {
+        setShowColumnSelector(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -107,7 +125,6 @@ export default function OrdersPage() {
     return { start: startQ, end: endQ };
   };
 
-  // 1. Fetch Main Orders Data with Robust Filtering
   const fetchOrders = useCallback(async () => {
     if (!shopInfo?.id) return;
     setLoading(true);
@@ -117,27 +134,26 @@ export default function OrdersPage() {
         .from('sales')
         .select(`
           *,
-          customers(name, phone),
-          salesman(id, name),
-          sale_items(*)
+          customers${appliedFilters.customer.trim() ? '!inner' : ''}(name, phone),
+          salesman${appliedFilters.salesRep.trim() ? '!inner' : ''}(id, name),
+          sale_items(*),
+          sale_payments(payment_method)
         `, { count: 'exact' })
         .eq('shop_id', shopInfo.id);
 
-      // Safe Order ID filter using id::text casting
       if (appliedFilters.orderId) {
         const idQuery = appliedFilters.orderId.trim().replace(/^#/, '');
         query = query.filter('id::text', 'ilike', `${idQuery}%`);
       }
       
-      // Customer search (name or phone)
       if (appliedFilters.customer) {
         const cVal = appliedFilters.customer.trim();
         query = query.or(`name.ilike.%${cVal}%,phone.ilike.%${cVal}%`, { foreignTable: 'customers' });
       }
       
-      // Sales Rep filter
       if (appliedFilters.salesRep) {
-        query = query.ilike('salesman.name', `%${appliedFilters.salesRep.trim()}%`);
+        const repVal = appliedFilters.salesRep.trim();
+        query = query.ilike('salesman.name', `%${repVal}%`);
       }
       
       const { start, end } = getQueryDates(appliedDates);
@@ -147,12 +163,17 @@ export default function OrdersPage() {
       if (appliedFilters.type) {
         query = query.eq('invoice_type', appliedFilters.type);
       }
-      
-      if (appliedFilters.status) {
-        const s = appliedFilters.status.toLowerCase();
-        if (s === 'pre_order') query = query.eq('sale_status', 'pre_order');
-        else if (s === 'paid') query = query.eq('payment_status', 'paid').neq('sale_status', 'pre_order');
-        else if (s === 'partial') query = query.eq('payment_status', 'partial');
+
+      if (appliedFilters.saleStatus) {
+        query = query.eq('sale_status', appliedFilters.saleStatus);
+      }
+
+      if (appliedFilters.paymentStatus) {
+        query = query.eq('payment_status', appliedFilters.paymentStatus);
+      }
+
+      if (appliedFilters.orderStatus) {
+        query = query.eq('order_status', appliedFilters.orderStatus);
       }
 
       const from = (currentPage - 1) * pageSize;
@@ -178,7 +199,6 @@ export default function OrdersPage() {
     }
   }, [shopInfo?.id, appliedFilters, appliedDates, currentPage, pageSize]);
 
-  // 2. Fetch Dynamic Totals via RPC
   const fetchSummary = useCallback(async () => {
     if (!shopInfo?.id) return;
 
@@ -186,13 +206,14 @@ export default function OrdersPage() {
       const { start, end } = getQueryDates(appliedDates);
       const cleanOrderId = appliedFilters.orderId ? appliedFilters.orderId.trim().replace(/^#/, '') : null;
 
+      // Pass general filters to summary RPC or compute locally if needed
       const { data, error } = await supabase.rpc('get_orders_summary', {
         p_shop_id: shopInfo.id,
         p_order_id: cleanOrderId,
         p_customer: appliedFilters.customer || null,
         p_salesman: appliedFilters.salesRep || null,
         p_type: appliedFilters.type || null,
-        p_status: appliedFilters.status || null,
+        p_status: appliedFilters.saleStatus || null,
         p_start_date: start,
         p_end_date: end
       });
@@ -242,7 +263,7 @@ export default function OrdersPage() {
   };
 
   const resetToThisMonth = () => {
-    const empty = { orderId: '', customer: '', salesRep: '', type: '', status: '' };
+    const empty = { orderId: '', customer: '', salesRep: '', type: '', saleStatus: '', paymentStatus: '', orderStatus: '' };
     setColFilters(empty);
     setDateRange(getInitialDates());
     setAppliedFilters(empty);
@@ -258,13 +279,14 @@ export default function OrdersPage() {
   const handleExportCSV = () => {
     if (orders.length === 0) return alert('No data to export.');
 
-    const headers = ['Order ID', 'Date', 'Customer', 'Sales Rep', 'Type', 'Status', 'Total Amount', 'Paid Amount', 'Pending Amount'];
+    const headers = ['Order ID', 'Date', 'Customer', 'Sales Rep', 'Type', 'Sale Status', 'Payment Status', 'Order Status', 'Total Amount', 'Paid Amount', 'Pending Amount'];
     const escapeCSV = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
 
     const rows = orders.map(o => {
       const total = Number(o.total_amount || 0);
       const paid = Number(o.paid_amount || total);
       const pending = Math.max(0, total - paid);
+      const paymentMethod = o.sale_payments?.[0]?.payment_method || o.payment_method || 'cash';
       
       return [
         escapeCSV(`#${o.id.slice(0, 8)}`),
@@ -272,7 +294,10 @@ export default function OrdersPage() {
         escapeCSV(o.customers?.name || 'Walk-in Customer'),
         escapeCSV(o.salesman?.name || 'Unassigned'),
         escapeCSV(o.invoice_type === 'gst' ? 'GST' : 'Estimate'),
-        escapeCSV(o.sale_status === 'pre_order' ? 'Pre-Order' : (o.payment_status || 'paid')),
+        escapeCSV(o.sale_status || 'completed'),
+        escapeCSV(o.payment_status || 'paid'),
+        escapeCSV(o.order_status || 'delivered'),
+        escapeCSV(paymentMethod),
         escapeCSV(total.toFixed(2)),
         escapeCSV(paid.toFixed(2)),
         escapeCSV(pending.toFixed(2))
@@ -307,6 +332,8 @@ export default function OrdersPage() {
       }
     });
 
+    const paymentMethod = order.sale_payments?.[0]?.payment_method || order.payment_method || 'cash';
+
     const formattedOrder = {
       saleId: order.id,
       shopName: shopInfo?.name || 'My Shop',
@@ -317,7 +344,7 @@ export default function OrdersPage() {
       items: order.sale_items || [],
       totalAmount: Number(order.total_amount),
       paidAmount: Number(order.paid_amount || order.total_amount),
-      paymentMethod: order.payment_method || 'cash',
+      paymentMethod,
       totalBase, totalGst, isGstInvoice: isGst, saleStatus: order.sale_status
     };
 
@@ -380,6 +407,10 @@ export default function OrdersPage() {
     );
   };
 
+  const toggleColumn = (key) => {
+    setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   return (
     <div className="layout">
       <Sidebar />
@@ -389,11 +420,36 @@ export default function OrdersPage() {
           <div className="top-bar">
             <div>
               <h1>Sales Orders Search & Manage</h1>
-              <p className="subtext" style={{ marginTop: '2px' }}>Showing records matching your filters (Press Enter in boxes to filter)</p>
+              <p className="subtext" style={{ marginTop: '2px' }}>Manage and filter orders, payment methods, and tracking statuses</p>
             </div>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', position: 'relative' }}>
+              
+              {/* Column Selector Toggle Button */}
+              <div ref={columnSelectorRef}>
+                <button className="secondary-btn" onClick={() => setShowColumnSelector(prev => !prev)}>
+                  ⚙️ Choose Columns
+                </button>
+                {showColumnSelector && (
+                  <div className="column-selector-dropdown">
+                    <h4>Toggle Visible Columns</h4>
+                    <div className="col-toggles-grid">
+                      {Object.keys(visibleColumns).map(col => (
+                        <label key={col} className="col-toggle-label">
+                          <input 
+                            type="checkbox" 
+                            checked={visibleColumns[col]} 
+                            onChange={() => toggleColumn(col)} 
+                          />
+                          <span style={{ textTransform: 'capitalize' }}>{col.replace(/([A-Z])/g, ' $1')}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {hasActiveFilters && (
-                <button className="secondary-btn" onClick={resetToThisMonth}>↺ Reset to This Month</button>
+                <button className="secondary-btn" onClick={resetToThisMonth}>↺ Reset Filters</button>
               )}
               <button className="export-btn" onClick={handleExportCSV}>📊 Export Page</button>
             </div>
@@ -431,50 +487,94 @@ export default function OrdersPage() {
                 <table className="orders-table">
                   <thead>
                     <tr className="header-titles-row">
-                      <th>
-                        <div className="th-content">
-                          Order ID
-                          <button className={`filter-icon-btn ${appliedFilters.orderId ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'orderId' ? null : 'orderId')}>▼</button>
-                        </div>
-                        {renderFilterMenu('orderId', 'Search ID & Enter...', 'text')}
-                      </th>
-                      <th>
-                        <div className="th-content">
-                          Date
-                          <button className={`filter-icon-btn ${(appliedDates.start || appliedDates.end) ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'date' ? null : 'date')}>▼</button>
-                        </div>
-                        {renderFilterMenu('date')}
-                      </th>
-                      <th>
-                        <div className="th-content">
-                          Customer
-                          <button className={`filter-icon-btn ${appliedFilters.customer ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'customer' ? null : 'customer')}>▼</button>
-                        </div>
-                        {renderFilterMenu('customer', 'Search name/phone & Enter...', 'text')}
-                      </th>
-                      <th>
-                        <div className="th-content">
-                          Sales Rep
-                          <button className={`filter-icon-btn ${appliedFilters.salesRep ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'salesRep' ? null : 'salesRep')}>▼</button>
-                        </div>
-                        {renderFilterMenu('salesRep', 'Search rep name & Enter...', 'text')}
-                      </th>
-                      <th>
-                        <div className="th-content">
-                          Type
-                          <button className={`filter-icon-btn ${appliedFilters.type ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'type' ? null : 'type')}>▼</button>
-                        </div>
-                        {renderFilterMenu('type', '', 'select', [{label: 'GST', value: 'gst'}, {label: 'Estimate', value: 'estimate'}])}
-                      </th>
-                      <th>
-                        <div className="th-content">
-                          Status
-                          <button className={`filter-icon-btn ${appliedFilters.status ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'status' ? null : 'status')}>▼</button>
-                        </div>
-                        {renderFilterMenu('status', '', 'select', [{label: 'Pre-Order', value: 'pre_order'}, {label: 'Paid', value: 'paid'}, {label: 'Partial', value: 'partial'}])}
-                      </th>
-                      <th>Payment Breakdown</th>
-                      <th>Actions</th>
+                      {visibleColumns.orderId && (
+                        <th>
+                          <div className="th-content">
+                            Order ID
+                            <button className={`filter-icon-btn ${appliedFilters.orderId ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'orderId' ? null : 'orderId')}>▼</button>
+                          </div>
+                          {renderFilterMenu('orderId', 'Search ID & Enter...', 'text')}
+                        </th>
+                      )}
+                      {visibleColumns.date && (
+                        <th>
+                          <div className="th-content">
+                            Date
+                            <button className={`filter-icon-btn ${(appliedDates.start || appliedDates.end) ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'date' ? null : 'date')}>▼</button>
+                          </div>
+                          {renderFilterMenu('date')}
+                        </th>
+                      )}
+                      {visibleColumns.customer && (
+                        <th>
+                          <div className="th-content">
+                            Customer
+                            <button className={`filter-icon-btn ${appliedFilters.customer ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'customer' ? null : 'customer')}>▼</button>
+                          </div>
+                          {renderFilterMenu('customer', 'Search name/phone & Enter...', 'text')}
+                        </th>
+                      )}
+                      {visibleColumns.salesRep && (
+                        <th>
+                          <div className="th-content">
+                            Sales Rep
+                            <button className={`filter-icon-btn ${appliedFilters.salesRep ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'salesRep' ? null : 'salesRep')}>▼</button>
+                          </div>
+                          {renderFilterMenu('salesRep', 'Search rep name & Enter...', 'text')}
+                        </th>
+                      )}
+                      {visibleColumns.type && (
+                        <th>
+                          <div className="th-content">
+                            Type
+                            <button className={`filter-icon-btn ${appliedFilters.type ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'type' ? null : 'type')}>▼</button>
+                          </div>
+                          {renderFilterMenu('type', '', 'select', [{label: 'GST', value: 'gst'}, {label: 'Estimate', value: 'estimate'}])}
+                        </th>
+                      )}
+                      {visibleColumns.saleStatus && (
+                        <th>
+                          <div className="th-content">
+                            Sale Status
+                            <button className={`filter-icon-btn ${appliedFilters.saleStatus ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'saleStatus' ? null : 'saleStatus')}>▼</button>
+                          </div>
+                          {renderFilterMenu('saleStatus', '', 'select', [
+                            {label: 'Completed', value: 'completed'},
+                            {label: 'Pre Order', value: 'pre_order'},
+                            {label: 'Pending', value: 'pending'},
+                            {label: 'Processing', value: 'processing'}
+                          ])}
+                        </th>
+                      )}
+                      {visibleColumns.paymentStatus && (
+                        <th>
+                          <div className="th-content">
+                            Payment Status
+                            <button className={`filter-icon-btn ${appliedFilters.paymentStatus ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'paymentStatus' ? null : 'paymentStatus')}>▼</button>
+                          </div>
+                          {renderFilterMenu('paymentStatus', '', 'select', [
+                            {label: 'Paid', value: 'paid'},
+                            {label: 'Partial', value: 'partial'},
+                            {label: 'Pending', value: 'pending'}
+                          ])}
+                        </th>
+                      )}
+                      {visibleColumns.orderStatus && (
+                        <th>
+                          <div className="th-content">
+                            Order Status
+                            <button className={`filter-icon-btn ${appliedFilters.orderStatus ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'orderStatus' ? null : 'orderStatus')}>▼</button>
+                          </div>
+                          {renderFilterMenu('orderStatus', '', 'select', [
+                            {label: 'Delivered', value: 'delivered'},
+                            {label: 'Confirmed', value: 'confirmed'},
+                            {label: 'Processing', value: 'processing'}
+                          ])}
+                        </th>
+                      )}
+                   
+                      {visibleColumns.breakdown && <th>Payment Breakdown</th>}
+                      {visibleColumns.actions && <th>Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -483,32 +583,52 @@ export default function OrdersPage() {
                       const paid = Number(order.paid_amount || total);
                       const pending = Math.max(0, total - paid);
                       const repName = order.salesman?.name || 'Unassigned';
-                      const isPreOrder = order.sale_status === 'pre_order';
+                      const sStatus = order.sale_status || 'completed';
                       const pStatus = order.payment_status || (paid >= total ? 'paid' : paid > 0 ? 'partial' : 'pending');
+                      const oStatus = order.order_status || (sStatus === 'pre_order' ? 'processing' : 'delivered');
+                      const payMethod = order.sale_payments?.[0]?.payment_method || order.payment_method || 'cash';
 
                       return (
                         <tr key={order.id}>
-                          <td><strong>#{order.id.slice(0, 8)}</strong></td>
-                          <td className="date-cell">
-                            {new Date(order.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}
-                          </td>
-                          <td><strong>{order.customers?.name || 'Walk-in Customer'}</strong></td>
-                          <td><span className="salesman-tag">👤 {repName}</span></td>
-                          <td><span className={`invoice-badge ${order.invoice_type === 'gst' ? 'gst' : 'estimate'}`}>{order.invoice_type === 'gst' ? 'GST' : 'Estimate'}</span></td>
-                          <td>
-                            <div className="status-container">
-                              {isPreOrder && <span className="pre-order-tag">⏳ Pre-Order</span>}
-                              <span className={`status-badge ${pStatus}`}>{pStatus.charAt(0).toUpperCase() + pStatus.slice(1)}</span>
-                            </div>
-                          </td>
-                          <td className="breakdown-cell">
-                            <div><span>Total: </span><strong>₹{total.toFixed(2)}</strong></div>
-                            <div className="paid-line"><span>Paid: </span><strong>₹{paid.toFixed(2)}</strong></div>
-                            {pending > 0 && <div className="pending-line"><span>Pending: </span><strong>₹{pending.toFixed(2)}</strong></div>}
-                          </td>
-                          <td>
-                            <button className="reprint-btn" onClick={() => handleReprint(order)}>🖨️ Reprint</button>
-                          </td>
+                          {visibleColumns.orderId && <td><strong>#{order.id.slice(0, 8)}</strong></td>}
+                          {visibleColumns.date && (
+                            <td className="date-cell">
+                              {new Date(order.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}
+                            </td>
+                          )}
+                          {visibleColumns.customer && <td><strong>{order.customers?.name || 'Walk-in Customer'}</strong></td>}
+                          {visibleColumns.salesRep && <td><span className="salesman-tag">👤 {repName}</span></td>}
+                          {visibleColumns.type && <td><span className={`invoice-badge ${order.invoice_type === 'gst' ? 'gst' : 'estimate'}`}>{order.invoice_type === 'gst' ? 'GST' : 'Estimate'}</span></td>}
+                          
+                          {visibleColumns.saleStatus && (
+                            <td>
+                              <span className={`status-badge sale-${sStatus}`}>{sStatus.replace('_', ' ')}</span>
+                            </td>
+                          )}
+                          {visibleColumns.paymentStatus && (
+                            <td>
+                              <span className={`status-badge payment-${pStatus}`}>{pStatus}</span>
+                            </td>
+                          )}
+                          {visibleColumns.orderStatus && (
+                            <td>
+                              <span className={`status-badge order-${oStatus}`}>{oStatus}</span>
+                            </td>
+                          )}
+
+                          {visibleColumns.breakdown && (
+                            <td className="breakdown-cell">
+                              <div><span>Total: </span><strong>₹{total.toFixed(2)}</strong></div>
+                              <div className="paid-line"><span>Paid: </span><strong>₹{paid.toFixed(2)}</strong></div>
+                              {pending > 0 && <div className="pending-line"><span>Pending: </span><strong>₹{pending.toFixed(2)}</strong></div>}
+                            </td>
+                          )}
+
+                          {visibleColumns.actions && (
+                            <td>
+                              <button className="reprint-btn" onClick={() => handleReprint(order)}>🖨️ Reprint</button>
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -559,6 +679,11 @@ export default function OrdersPage() {
         .secondary-btn { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 13px; }
         .secondary-btn:hover { background: #f1f5f9; }
 
+        .column-selector-dropdown { position: absolute; right: 0; top: 100%; background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); z-index: 100; width: 240px; }
+        .column-selector-dropdown h4 { font-size: 13px; font-weight: 700; color: #0f172a; margin: 0 0 10px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+        .col-toggles-grid { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
+        .col-toggle-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; cursor: pointer; }
+
         .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
         .summary-card { background: white; padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 4px; }
         .summary-card.success { border-left: 4px solid #16a34a; }
@@ -573,7 +698,17 @@ export default function OrdersPage() {
         .loading-text, .empty-text { text-align: center; color: #64748b; padding: 40px 0; flex: 1; display: flex; align-items: center; justify-content: center; }
 
         .orders-table { width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; font-size: 13px; }
-        .orders-table th { background: #f1f5f9; color: #475569; padding: 12px 14px; font-weight: 600; white-space: nowrap; position: sticky; top: 0; z-index: 10; border-bottom: 1px solid #e2e8f0; position: relative; }
+        .orders-table th {
+          background: #f1f5f9;
+          color: #475569;
+          padding: 12px 14px;
+          font-weight: 600;
+          white-space: nowrap;
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          border-bottom: 1px solid #e2e8f0;
+        }
         .orders-table td { padding: 12px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
         .orders-table tbody tr:hover { background: #f8fafc; }
         
@@ -582,12 +717,19 @@ export default function OrdersPage() {
         .invoice-badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; display: inline-block; }
         .invoice-badge.gst { background: #e0f2fe; color: #0369a1; }
         .invoice-badge.estimate { background: #fef3c7; color: #92400e; }
-        .status-container { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-        .pre-order-tag { background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; border: 1px solid #fde68a; }
+        
         .status-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: capitalize; display: inline-block; }
-        .status-badge.paid { background: #dcfce7; color: #15803d; }
-        .status-badge.partial { background: #fef9c3; color: #a16207; }
-        .status-badge.pending { background: #fee2e2; color: #b91c1c; }
+        .status-badge.payment-paid { background: #dcfce7; color: #15803d; }
+        .status-badge.payment-partial { background: #fef9c3; color: #a16207; }
+        .status-badge.payment-pending { background: #fee2e2; color: #b91c1c; }
+        .status-badge.sale-completed { background: #f1f5f9; color: #334155; }
+        .status-badge.sale-pre_order { background: #fef3c7; color: #92400e; }
+        .status-badge.order-delivered { background: #e0f2fe; color: #0369a1; }
+        .status-badge.order-confirmed { background: #f3e8ff; color: #6b21a8; }
+        .status-badge.order-processing { background: #ffedd5; color: #c2410c; }
+
+        .pay-method-badge { background: #f8fafc; border: 1px solid #cbd5e1; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #334155; }
+
         .breakdown-cell { font-size: 12px; color: #334155; }
         .paid-line { color: #16a34a; margin-top: 2px; }
         .pending-line { color: #b91c1c; margin-top: 2px; }

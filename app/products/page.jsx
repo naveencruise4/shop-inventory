@@ -560,7 +560,7 @@ export default function ProductsPage() {
 
                   <div className="filter-item">
                     <label>Sort By</label>
-                    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                    <select value={sortBy} onChange={(e) => {setSortBy(e.target.value); setCurrentPage(1);}}>
                       <option value="name_asc">Name (A - Z)</option>
                       <option value="name_desc">Name (Z - A)</option>
                       <option value="price_asc">Price (Low to High)</option>
