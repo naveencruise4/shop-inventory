@@ -237,7 +237,6 @@ export default function POSPage() {
     fetchSalesman();
   };
 
-  // FIX: Validate stock when switching from Pre-Order to Immediate Sale
   const handleOrderTypeChange = (newType) => {
     if (newType === 'sale' && !convertingPreOrder) {
       const invalidItems = cart.filter(item => Number(item.quantity) > Number(item.available_stock || 0));
@@ -399,7 +398,7 @@ export default function POSPage() {
   const getFinalTotal = () => {
     const custom = Number(customGrandTotal);
     const subtotal = (!isNaN(custom) && custom > 0) ? custom : calculateCurrentSubtotal();
-    return Math.ceil(subtotal); // 👈 Rounds up final total to nearest whole integer
+    return Math.ceil(subtotal);
   };
 
   // Pre-Order Calculations
@@ -419,13 +418,12 @@ export default function POSPage() {
   };
 
   const handleLoadPreOrderForConversion = async (po) => {
-    // 1. Extract product IDs from the pre-order items
     const productIds = po.sale_items.map(si => si.product_id);
 
-    // 2. Query actual stock data from Supabase view
+    // Query actual product stock and GST metadata from Supabase view
     const { data: stockData, error } = await supabase
       .from('vw_product_stock')
-      .select('id, available_stock, total_stock, delivered_stock, unit, booked_stock')
+      .select('id, available_stock, total_stock, delivered_stock, unit, booked_stock, has_gst, gst_percentage, name, selling_price')
       .in('id', productIds);
 
     if (error) {
@@ -433,31 +431,29 @@ export default function POSPage() {
       return;
     }
 
-    // Create a fast lookup map for the stock data
     const stockMap = new Map(stockData.map(p => [p.id, p]));
 
     setConvertingPreOrder(po);
     setSelectedCustomer(po.customers ? { id: po.customer_id, name: po.customers.name, phone: po.customers.phone } : null);
     if (po.customers) setCustomerSearch(`${po.customers.name} (${po.customers.phone || ''})`);
 
-    // 3. Map pre-order items using ACTUAL stock values from the database
     const loadedItems = po.sale_items.map(si => {
-      const liveStock = stockMap.get(si.product_id);
+      const liveProduct = stockMap.get(si.product_id);
       return {
         id: si.product_id,
         sku: si.sku,
-        name: si.name || si.sku,
-        unit: si.unit || liveStock?.unit || 'Nos',
+        name: si.name || liveProduct?.name || si.sku,
+        unit: si.unit || liveProduct?.unit || 'Nos',
         quantity: si.quantity,
         price: si.unit_price,
         originalPrice: si.unit_price,
-        has_gst: si.has_gst,
-        gst_percentage: si.gst_percentage,
-        // 👇 Real database stock metrics instead of 9999
-        available_stock: liveStock ? Number(liveStock.available_stock || 0) : 0,
-        total_stock: liveStock ? Number(liveStock.total_stock || 0) : 0,
-        delivered_stock: liveStock ? Number(liveStock.delivered_stock || 0) : 0,
-        booked_stock: liveStock ? Number(liveStock.booked_stock || 0) : 0
+        // 👇 FIX: Pull live product GST properties instead of relying on the pre-order's estimate item flags
+        has_gst: liveProduct ? Boolean(liveProduct.has_gst) : Boolean(si.has_gst),
+        gst_percentage: liveProduct ? Number(liveProduct.gst_percentage || 0) : Number(si.gst_percentage || 0),
+        available_stock: liveProduct ? Number(liveProduct.available_stock || 0) : 0,
+        total_stock: liveProduct ? Number(liveProduct.total_stock || 0) : 0,
+        delivered_stock: liveProduct ? Number(liveProduct.delivered_stock || 0) : 0,
+        booked_stock: liveProduct ? Number(liveProduct.booked_stock || 0) : 0
       };
     });
 
@@ -492,17 +488,12 @@ export default function POSPage() {
     try {
       if (!shopInfo.id) return;
 
-      // Only require physical stock when closing an existing pre-order.
-      // Saving a new pre-order or recording a partial payment must remain allowed
-      // even when the stock has not arrived yet.
       const totalPaidAfterThisPayment = alreadyPaidAdvance + enteredPaid;
       const isClosingPreOrder = Boolean(
         convertingPreOrder && totalPaidAfterThisPayment >= finalTotal - 0.01
       );
 
       if (isClosingPreOrder) {
-        // Re-fetch current stock immediately before any complete_sale RPC call.
-        // Aggregate quantities by product in case the cart contains duplicates.
         const requestedByProduct = new Map();
         for (const item of cart) {
           const productId = item.id;
@@ -536,8 +527,6 @@ export default function POSPage() {
             continue;
           }
 
-          // Keep consistent with the existing pre-order fulfillment checks in this page.
-          // This assumes total_stock is the stock quantity against which delivered_stock is deducted.
           const physicalHeadroom = Number(product.total_stock || 0) - Number(product.delivered_stock || 0);
           if (requestedQty > physicalHeadroom + 0.0001) {
             insufficientItems.push(
@@ -550,6 +539,7 @@ export default function POSPage() {
           alert(
             `Cannot close this pre-order because there is insufficient physical stock for:\n\n${insufficientItems.join('\n')}\n\nThe pre-order will remain open. Receive the missing stock before completing fulfillment.`
           );
+          setIsCheckingOut(false);
           return;
         }
       }
@@ -557,13 +547,31 @@ export default function POSPage() {
       let createdGstOrder = null;
       let createdEstimateOrder = null;
 
-      if (billingMode === 'estimate_only' || billingMode === 'gst_only' || orderType === 'pre_order') {
-        const isGstBatch = billingMode === 'gst_only' || (convertingPreOrder ? convertingPreOrder.invoice_type === 'gst' : true);
+      let willBeCompleted = false;
+      if (orderType === 'pre_order') {
+        willBeCompleted = false;
+      } else if (convertingPreOrder) {
+        willBeCompleted = totalPaidAfterThisPayment >= finalTotal - 0.01;
+      } else {
+        willBeCompleted = true;
+      }
+
+      const shouldUseAutoSplit = billingMode === 'auto_split' && willBeCompleted;
+
+      if (!shouldUseAutoSplit) {
+        // If billingMode is auto_split but it's a partial pre-order, default to estimate.
+        // If closing an order with only GST items, make sure it types as 'gst'.
+        const hasAnyGstItem = cart.some(item => item.has_gst && Number(item.gst_percentage || 0) > 0);
+        let targetInvoiceType = 'estimate';
+        if (billingMode === 'gst_only') targetInvoiceType = 'gst';
+        else if (billingMode === 'auto_split' && hasAnyGstItem && willBeCompleted) targetInvoiceType = 'gst';
+
+        const isGstBatch = targetInvoiceType === 'gst';
         const { totalBase, totalGst } = calculateTotalGSTBreakdown(cart);
 
         const itemsPayload = cart.map(item => {
           const pct = Number(item.gst_percentage || 0);
-          const isTaxed = item.has_gst && pct > 0;
+          const isTaxed = isGstBatch && item.has_gst && pct > 0;
           const baseUnitPrice = isTaxed ? Number((item.price / (1 + pct / 100)).toFixed(2)) : item.price;
           const unitGstAmount = isTaxed ? Number((item.price - baseUnitPrice).toFixed(2)) : 0;
 
@@ -607,8 +615,15 @@ export default function POSPage() {
 
         if (rpcError) throw rpcError;
 
+        let fetchedOrderNumber = null;
+        if (saleId) {
+          const { data: saleData } = await supabase.from('sales').select('order_number').eq('id', saleId).single();
+          fetchedOrderNumber = saleData?.order_number || null;
+        }
+
         const singleOrderResult = {
           saleId,
+          orderNumber: fetchedOrderNumber,
           shopName: shopInfo.name,
           date: new Date().toLocaleString(),
           customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
@@ -628,6 +643,7 @@ export default function POSPage() {
         else createdEstimateOrder = singleOrderResult;
 
       } else {
+        // --- AUTO-SPLIT (Triggers ONLY when fully paid / completed) ---
         let gstCartItems = [];
         let estimateCartItems = [];
 
@@ -640,17 +656,15 @@ export default function POSPage() {
         const estimateTotalRaw = estimateCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
         const grandCartTotalRaw = gstTotalRaw + estimateTotalRaw;
 
-        // 1. Scale sub-totals to match the rounded finalTotal integer precisely
         const scaleFactor = grandCartTotalRaw > 0 ? finalTotal / grandCartTotalRaw : 1;
         const gstTotal = Math.round(gstTotalRaw * scaleFactor);
-        const estimateTotal = finalTotal - gstTotal; // guarantees exact sum === finalTotal
+        const estimateTotal = finalTotal - gstTotal;
 
         const totalOverallPaidSoFar = convertingPreOrder ? alreadyPaidAdvance + enteredPaid : finalTotal;
         const totalOverallAdvance = convertingPreOrder ? alreadyPaidAdvance : 0;
 
         const gstRatio = grandCartTotalRaw > 0 ? gstTotalRaw / grandCartTotalRaw : 0;
 
-        // 2. Allocate exact proportional paid amounts matching each batch total exactly
         const gstPaidAllocated = Number((totalOverallPaidSoFar * gstRatio).toFixed(2));
         const estPaidAllocated = Number((totalOverallPaidSoFar - gstPaidAllocated).toFixed(2));
 
@@ -683,15 +697,9 @@ export default function POSPage() {
             };
           });
 
-          // Ensure both split invoices show as fully completed and paid for direct sales
-          let finalStatus = saleStatus;
-          let paymentForThisBatch = batchTotal; // Force batch to match its full total so paid == total
-
+          let paymentForThisBatch = batchTotal;
           if (convertingPreOrder) {
-            if (allocatedPaid < batchTotal) finalStatus = 'pre_order';
             paymentForThisBatch = existingId ? (allocatedPaid - allocatedAdvance) : allocatedPaid;
-          } else {
-            finalStatus = 'completed';
           }
 
           const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
@@ -701,7 +709,7 @@ export default function POSPage() {
             p_items: itemsPayload,
             p_amount_paid: paymentForThisBatch,
             p_payment_method: paymentMethod || 'cash',
-            p_sale_status: finalStatus,
+            p_sale_status: 'completed',
             p_salesman_id: selectedSalesman?.id || null,
             p_invoice_type: isGstBatch ? 'gst' : 'estimate',
             p_existing_sale_id: existingId || null
@@ -709,8 +717,15 @@ export default function POSPage() {
 
           if (rpcError) throw rpcError;
 
+          let fetchedOrderNumber = null;
+          if (saleId) {
+            const { data: saleData } = await supabase.from('sales').select('order_number').eq('id', saleId).single();
+            fetchedOrderNumber = saleData?.order_number || null;
+          }
+
           return {
             saleId,
+            orderNumber: fetchedOrderNumber,
             shopName: shopInfo.name,
             date: new Date().toLocaleString(),
             customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
@@ -723,7 +738,7 @@ export default function POSPage() {
             totalBase,
             totalGst,
             isGstInvoice: isGstBatch,
-            saleStatus: finalStatus
+            saleStatus: 'completed'
           };
         };
 
@@ -739,13 +754,18 @@ export default function POSPage() {
         }
 
         if (estimateCartItems.length > 0 && estimateTotal > 0) {
+          const estimateExistingSaleId =
+            convertingPreOrder && gstCartItems.length === 0
+              ? convertingPreOrder.id
+              : null;
+
           createdEstimateOrder = await submitOrderBatch(
-            estimateCartItems, 
-            estimateTotal, 
-            estPaidAllocated, 
-            estAdvanceAllocated, 
-            false, 
-            null
+            estimateCartItems,
+            estimateTotal,
+            estPaidAllocated,
+            estAdvanceAllocated,
+            false,
+            estimateExistingSaleId
           );
         }
       }
