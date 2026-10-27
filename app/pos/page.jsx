@@ -20,6 +20,9 @@ export default function POSPage() {
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
   const [newCust, setNewCust] = useState({ name: '', phone: '', email: '' });
 
+  const [customerSearchResults, setCustomerSearchResults] = useState([]);
+  const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
+
   // Salesman State
   const [salesman, setSalesman] = useState([]);
   const [selectedSalesman, setSelectedSalesman] = useState(null);
@@ -128,6 +131,40 @@ export default function POSPage() {
     if (data) setPendingPreOrders(data);
   };
 
+  // 1. Debounced effect: fires Supabase query 400ms after user stops typing
+  useEffect(() => {
+    const phoneTerm = customerSearch.trim();
+
+    // Don't search if field is empty or less than 3 characters
+    if (!shopInfo.id || phoneTerm.length < 3) {
+      setCustomerSearchResults([]);
+      setIsSearchingCustomer(false);
+      return;
+    }
+
+    setIsSearchingCustomer(true);
+    const timerId = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('shop_id', shopInfo.id)
+          .ilike('phone', `%${phoneTerm}%`)
+          .limit(10);
+
+        if (error) throw error;
+        setCustomerSearchResults(data || []);
+      } catch (err) {
+        console.error('Error searching customer by phone:', err.message);
+      } finally {
+        setIsSearchingCustomer(false);
+      }
+    }, 400); // Waits 400ms of typing pause before hitting Supabase
+
+    // Cleanup timer if user types another character before 400ms expires
+    return () => clearTimeout(timerId);
+  }, [customerSearch, shopInfo.id]);
+
   const handleProductSearchSubmit = (e) => {
     if (e) e.preventDefault();
     const queryTerm = searchTerm.trim();
@@ -172,11 +209,6 @@ export default function POSPage() {
     setShowDropdown(false);
     fetchInitialData();
   };
-
-  const filteredCustomers = customers.filter(c =>
-    c.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-    c.phone?.includes(customerSearch)
-  );
 
   const filteredSalesman = salesman.filter(s =>
     s.name?.toLowerCase().includes(salesmanSearch.toLowerCase())
@@ -420,7 +452,6 @@ export default function POSPage() {
   const handleLoadPreOrderForConversion = async (po) => {
     const productIds = po.sale_items.map(si => si.product_id);
 
-    // Query actual product stock and GST metadata from Supabase view
     const { data: stockData, error } = await supabase
       .from('vw_product_stock')
       .select('id, available_stock, total_stock, delivered_stock, unit, booked_stock, has_gst, gst_percentage, name, selling_price')
@@ -447,7 +478,6 @@ export default function POSPage() {
         quantity: si.quantity,
         price: si.unit_price,
         originalPrice: si.unit_price,
-        // 👇 FIX: Pull live product GST properties instead of relying on the pre-order's estimate item flags
         has_gst: liveProduct ? Boolean(liveProduct.has_gst) : Boolean(si.has_gst),
         gst_percentage: liveProduct ? Number(liveProduct.gst_percentage || 0) : Number(si.gst_percentage || 0),
         available_stock: liveProduct ? Number(liveProduct.available_stock || 0) : 0,
@@ -474,8 +504,7 @@ export default function POSPage() {
       return;
     }
 
-    const enteredPaid = amountPaid !== '' ? Number(amountPaid) : 0;
-
+    const enteredPaid = amountPaid !== '' ? Number(amountPaid) : (orderType === 'pre_order' ? 0 : 0);
     if (orderType === 'sale' && !convertingPreOrder && Math.abs(enteredPaid - finalTotal) > 0.01) {
       alert(
          `⚠️ Amount Mismatch Warning!\n\nAmount Paid (₹${enteredPaid.toFixed(2)}) does not equal Final Payable Amount (₹${finalTotal.toFixed(2)}).`
@@ -559,8 +588,6 @@ export default function POSPage() {
       const shouldUseAutoSplit = billingMode === 'auto_split' && willBeCompleted;
 
       if (!shouldUseAutoSplit) {
-        // If billingMode is auto_split but it's a partial pre-order, default to estimate.
-        // If closing an order with only GST items, make sure it types as 'gst'.
         const hasAnyGstItem = cart.some(item => item.has_gst && Number(item.gst_percentage || 0) > 0);
         let targetInvoiceType = 'estimate';
         if (billingMode === 'gst_only') targetInvoiceType = 'gst';
@@ -643,7 +670,6 @@ export default function POSPage() {
         else createdEstimateOrder = singleOrderResult;
 
       } else {
-        // --- AUTO-SPLIT (Triggers ONLY when fully paid / completed) ---
         let gstCartItems = [];
         let estimateCartItems = [];
 
@@ -902,47 +928,53 @@ export default function POSPage() {
               )}
 
               <div className="pos-meta-grid">
-                {/* Customer Input */}
+                {/* Customer Input (Phone Number Search Only) */}
                 <div className="select-section" ref={customerDropdownRef}>
-                  <label>Customer</label>
+                  <label>Customer Phone Number *</label>
                   <div className="customer-input-row">
                     <input
-                      placeholder="Search name or phone..."
+                      placeholder="Type customer phone number (min 3 digits)..."
                       value={customerSearch}
                       onChange={(e) => {
-                        setCustomerSearch(e.target.value);
+                        const val = e.target.value;
+                        setCustomerSearch(val);
                         setShowCustomerDropdown(true);
-                        if (!e.target.value) setSelectedCustomer(null);
+                        if (!val) {
+                          setSelectedCustomer(null);
+                          setCustomerSearchResults([]);
+                        }
                       }}
                       onFocus={() => setShowCustomerDropdown(true)}
                       className="search-input"
                     />
                     {selectedCustomer && (
-                      <button className="clear-cust-btn" onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}>✕</button>
+                      <button className="clear-cust-btn" onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); setCustomerSearchResults([]); }}>✕</button>
                     )}
                   </div>
 
-                  {showCustomerDropdown && customerSearch.trim() !== '' && (
+                  {showCustomerDropdown && customerSearch.trim().length >= 3 && (
                     <div className="dropdown-list">
-                      {filteredCustomers.length > 0 ? (
-                        filteredCustomers.map(c => (
+                      {isSearchingCustomer ? (
+                        <div className="dropdown-item empty">Searching customer...</div>
+                      ) : customerSearchResults.length > 0 ? (
+                        customerSearchResults.map(c => (
                           <div key={c.id} className="dropdown-item" onClick={() => {
                             setSelectedCustomer(c);
-                            setCustomerSearch(`${c.name} (${c.phone || 'No Phone'})`);
+                            setCustomerSearch(`${c.name} (${c.phone})`);
                             setShowCustomerDropdown(false);
                           }}>
                             <div>
-                              <strong>{c.name}</strong> <span className="subtext">{c.phone || 'No phone'}</span>
+                              <strong>{c.name}</strong> <span className="subtext">{c.phone}</span>
                             </div>
                           </div>
                         ))
                       ) : (
                         <div className="dropdown-item create-new-prompt" onClick={() => {
                           setShowCustomerDropdown(false);
-                          setNewCust({ name: customerSearch, phone: isNaN(customerSearch) ? '' : customerSearch, email: '' });
+                          setNewCust({ name: '', phone: customerSearch.trim(), email: '' });
                           setShowNewCustomerModal(true);
                         }}>
-                          <span>🔍 Customer not found. <strong>+ Create new customer</strong></span>
+                          <span>🔍 No customer with phone "{customerSearch}". <strong>+ Create new customer</strong></span>
                         </div>
                       )}
                     </div>

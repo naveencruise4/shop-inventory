@@ -47,10 +47,9 @@ export default function OrdersPage() {
 
   const columnSelectorRef = useRef(null);
 
-  // Default Date Range: Start of current month to Today
+// Default Date Range: Today (Start of today to End of today)
   const getInitialDates = () => {
     const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     
     const formatDate = (date) => {
       const d = new Date(date);
@@ -62,7 +61,8 @@ export default function OrdersPage() {
       return [year, month, day].join('-');
     };
 
-    return { start: formatDate(firstDay), end: formatDate(today) };
+    const todayStr = formatDate(today);
+    return { start: todayStr, end: todayStr };
   };
 
   const [colFilters, setColFilters] = useState({
@@ -294,7 +294,7 @@ export default function OrdersPage() {
     setActiveFilterCol(null);
   };
 
-  const resetToThisMonth = () => {
+  const resetToToday = () => {
     const empty = { orderNumber: '', orderId: '', customer: '', salesRep: '', type: '', saleStatus: '', paymentStatus: '', orderStatus: '' };
     setColFilters(empty);
     setDateRange(getInitialDates());
@@ -316,7 +316,7 @@ export default function OrdersPage() {
 
     const rows = orders.map(o => {
       const total = Number(o.total_amount || 0);
-      const paid = Number(o.paid_amount || total);
+      const paid = Number(o.paid_amount || 0);
       const pending = Math.max(0, total - paid);
       const paymentMethod = o.sale_payments?.[0]?.payment_method || o.payment_method || 'cash';
       
@@ -377,7 +377,7 @@ export default function OrdersPage() {
       salesmanName: order.salesman?.name || 'Unassigned',
       items: order.sale_items || [],
       totalAmount: Number(order.total_amount),
-      paidAmount: Number(order.paid_amount || order.total_amount),
+      paidAmount: Number(order.paid_amount || 0),
       paymentMethod,
       totalBase, totalGst, isGstInvoice: isGst, saleStatus: order.sale_status
     };
@@ -482,7 +482,7 @@ export default function OrdersPage() {
               </div>
 
               {hasActiveFilters && (
-                <button className="secondary-btn" onClick={resetToThisMonth}>↺ Reset Filters</button>
+                <button className="secondary-btn" onClick={resetToToday}>↺ Reset Filters</button>
               )}
               <button className="export-btn" onClick={handleExportCSV}>📊 Export Page</button>
             </div>
@@ -619,7 +619,7 @@ export default function OrdersPage() {
                   <tbody>
                     {orders.map(order => {
                       const total = Number(order.total_amount || 0);
-                      const paid = Number(order.paid_amount || total);
+                      const paid = Number(order.paid_amount || 0);
                       const pending = Math.max(0, total - paid);
                       const repName = order.salesman?.name || 'Unassigned';
                       const sStatus = order.sale_status || 'completed';

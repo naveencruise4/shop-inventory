@@ -22,7 +22,7 @@ export default function LoginPage() {
       alert(`Login failed: ${error.message}`);
     } else {
       document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=28800; SameSite=Lax`;
-      router.push('/dashboard');
+      router.push('/pos');
     }
   };
 
