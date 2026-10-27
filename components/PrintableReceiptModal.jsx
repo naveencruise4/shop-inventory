@@ -147,14 +147,19 @@ export default function PrintableReceiptModal({
             <div className="receipt-meta-block">
               <div className="receipt-meta">
                 <div><strong>Date:</strong> {currentActiveOrder.date}</div>
-                <div><strong>Order ID:</strong> {currentActiveOrder.saleId?.slice(0, 8)}</div>
+                {currentActiveOrder.orderNumber && (
+                  <div><strong>Order No:</strong> {currentActiveOrder.orderNumber}</div>
+                )}
+                
               </div>
               <div className="receipt-meta">
                 <div><strong>Customer:</strong> {currentActiveOrder.customer} {currentActiveOrder.customerPhone ? `(${currentActiveOrder.customerPhone})` : ''}</div>
-                <div><strong>Payment:</strong> {currentActiveOrder.paymentMethod?.toUpperCase()}</div>
+                <div><strong>Order ID:</strong> #{currentActiveOrder.saleId?.slice(0, 8)}</div>
+                
               </div>
               <div className="receipt-meta">
                 <div><strong>Sales Rep:</strong> {currentActiveOrder.salesmanName || 'Unassigned'}</div>
+                <div><strong>Payment:</strong> {currentActiveOrder.paymentMethod?.toUpperCase()}</div>
               </div>
             </div>
 

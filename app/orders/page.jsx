@@ -13,6 +13,11 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
 
+  // Salesmen list state for inline editing
+  const [salesmenList, setSalesmenList] = useState([]);
+  const [editingSalesmanOrderId, setEditingSalesmanOrderId] = useState(null);
+  const [selectedRepId, setSelectedRepId] = useState('');
+
   // Summary Totals State
   const [summary, setSummary] = useState({
     totalAmount: 0,
@@ -27,6 +32,7 @@ export default function OrdersPage() {
   // Column Visibility Toggle State
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState({
+    orderNumber: true,
     orderId: true,
     date: true,
     customer: true,
@@ -35,7 +41,6 @@ export default function OrdersPage() {
     saleStatus: true,
     paymentStatus: true,
     orderStatus: true,
-  //  paymentMethod: true,
     breakdown: true,
     actions: true
   });
@@ -61,6 +66,7 @@ export default function OrdersPage() {
   };
 
   const [colFilters, setColFilters] = useState({
+    orderNumber: '',
     orderId: '',
     customer: '',
     salesRep: '',
@@ -105,8 +111,16 @@ export default function OrdersPage() {
     
     if (appUser?.shop_id) {
       const { data: shop } = await supabase.from('shops').select('id, name').eq('id', appUser.shop_id).single();
-      if (shop) setShopInfo(shop);
+      if (shop) {
+        setShopInfo(shop);
+        fetchSalesmen(shop.id);
+      }
     }
+  };
+
+  const fetchSalesmen = async (shopId) => {
+    const { data } = await supabase.from('salesman').select('id, name').eq('shop_id', shopId);
+    if (data) setSalesmenList(data);
   };
 
   const getQueryDates = (range) => {
@@ -140,6 +154,10 @@ export default function OrdersPage() {
           sale_payments(payment_method)
         `, { count: 'exact' })
         .eq('shop_id', shopInfo.id);
+
+      if (appliedFilters.orderNumber) {
+        query = query.ilike('order_number', `%${appliedFilters.orderNumber.trim()}%`);
+      }
 
       if (appliedFilters.orderId) {
         const idQuery = appliedFilters.orderId.trim().replace(/^#/, '');
@@ -206,7 +224,6 @@ export default function OrdersPage() {
       const { start, end } = getQueryDates(appliedDates);
       const cleanOrderId = appliedFilters.orderId ? appliedFilters.orderId.trim().replace(/^#/, '') : null;
 
-      // Pass general filters to summary RPC or compute locally if needed
       const { data, error } = await supabase.rpc('get_orders_summary', {
         p_shop_id: shopInfo.id,
         p_order_id: cleanOrderId,
@@ -236,6 +253,21 @@ export default function OrdersPage() {
     fetchSummary();
   }, [fetchOrders, fetchSummary]);
 
+  const handleUpdateSalesman = async (orderId) => {
+    const newSalesmanId = selectedRepId === '' ? null : selectedRepId;
+    const { error } = await supabase
+      .from('sales')
+      .update({ salesman_id: newSalesmanId })
+      .eq('id', orderId);
+
+    if (error) {
+      alert(`Failed to update salesman: ${error.message}`);
+    } else {
+      setEditingSalesmanOrderId(null);
+      fetchOrders();
+    }
+  };
+
   const handleFilterChange = (col, value) => {
     setColFilters(prev => ({ ...prev, [col]: value }));
   };
@@ -263,7 +295,7 @@ export default function OrdersPage() {
   };
 
   const resetToThisMonth = () => {
-    const empty = { orderId: '', customer: '', salesRep: '', type: '', saleStatus: '', paymentStatus: '', orderStatus: '' };
+    const empty = { orderNumber: '', orderId: '', customer: '', salesRep: '', type: '', saleStatus: '', paymentStatus: '', orderStatus: '' };
     setColFilters(empty);
     setDateRange(getInitialDates());
     setAppliedFilters(empty);
@@ -279,7 +311,7 @@ export default function OrdersPage() {
   const handleExportCSV = () => {
     if (orders.length === 0) return alert('No data to export.');
 
-    const headers = ['Order ID', 'Date', 'Customer', 'Sales Rep', 'Type', 'Sale Status', 'Payment Status', 'Order Status', 'Total Amount', 'Paid Amount', 'Pending Amount'];
+    const headers = ['Order Number', 'Order ID', 'Date', 'Customer', 'Sales Rep', 'Type', 'Sale Status', 'Payment Status', 'Order Status', 'Payment Method', 'Total Amount', 'Paid Amount', 'Pending Amount'];
     const escapeCSV = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
 
     const rows = orders.map(o => {
@@ -289,6 +321,7 @@ export default function OrdersPage() {
       const paymentMethod = o.sale_payments?.[0]?.payment_method || o.payment_method || 'cash';
       
       return [
+        escapeCSV(o.order_number || '-'),
         escapeCSV(`#${o.id.slice(0, 8)}`),
         escapeCSV(new Date(o.created_at).toLocaleString()),
         escapeCSV(o.customers?.name || 'Walk-in Customer'),
@@ -336,6 +369,7 @@ export default function OrdersPage() {
 
     const formattedOrder = {
       saleId: order.id,
+      orderNumber: order.order_number,
       shopName: shopInfo?.name || 'My Shop',
       date: new Date(order.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       customer: order.customers?.name || 'Walk-in Customer',
@@ -420,11 +454,10 @@ export default function OrdersPage() {
           <div className="top-bar">
             <div>
               <h1>Sales Orders Search & Manage</h1>
-              <p className="subtext" style={{ marginTop: '2px' }}>Manage and filter orders, payment methods, and tracking statuses</p>
+              <p className="subtext" style={{ marginTop: '2px' }}>Manage and filter orders, salesmen, payment methods, and tracking statuses</p>
             </div>
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', position: 'relative' }}>
               
-              {/* Column Selector Toggle Button */}
               <div ref={columnSelectorRef}>
                 <button className="secondary-btn" onClick={() => setShowColumnSelector(prev => !prev)}>
                   ⚙️ Choose Columns
@@ -455,7 +488,6 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          {/* DYNAMIC SUMMARY CARDS */}
           <div className="summary-cards">
             <div className="summary-card">
               <span className="summary-label">Total Orders</span>
@@ -487,6 +519,15 @@ export default function OrdersPage() {
                 <table className="orders-table">
                   <thead>
                     <tr className="header-titles-row">
+                      {visibleColumns.orderNumber && (
+                        <th>
+                          <div className="th-content">
+                            Order Number
+                            <button className={`filter-icon-btn ${appliedFilters.orderNumber ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'orderNumber' ? null : 'orderNumber')}>▼</button>
+                          </div>
+                          {renderFilterMenu('orderNumber', 'Search Order # & Enter...', 'text')}
+                        </th>
+                      )}
                       {visibleColumns.orderId && (
                         <th>
                           <div className="th-content">
@@ -541,7 +582,6 @@ export default function OrdersPage() {
                           {renderFilterMenu('saleStatus', '', 'select', [
                             {label: 'Completed', value: 'completed'},
                             {label: 'Pre Order', value: 'pre_order'}
-                            
                           ])}
                         </th>
                       )}
@@ -585,18 +625,54 @@ export default function OrdersPage() {
                       const sStatus = order.sale_status || 'completed';
                       const pStatus = order.payment_status || (paid >= total ? 'paid' : paid > 0 ? 'partial' : 'pending');
                       const oStatus = order.order_status || (sStatus === 'pre_order' ? 'processing' : 'delivered');
-                      const payMethod = order.sale_payments?.[0]?.payment_method || order.payment_method || 'cash';
+                      const isEditingRep = editingSalesmanOrderId === order.id;
 
                       return (
                         <tr key={order.id}>
-                          {visibleColumns.orderId && <td><strong>#{order.id.slice(0, 8)}</strong></td>}
+                          {visibleColumns.orderNumber && <td><strong>{order.order_number || '-'}</strong></td>}
+                          {visibleColumns.orderId && <td><span className="subtext">#{order.id.slice(0, 8)}</span></td>}
                           {visibleColumns.date && (
                             <td className="date-cell">
                               {new Date(order.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}
                             </td>
                           )}
                           {visibleColumns.customer && <td><strong>{order.customers?.name || 'Walk-in Customer'}</strong></td>}
-                          {visibleColumns.salesRep && <td><span className="salesman-tag">👤 {repName}</span></td>}
+                          
+                          {visibleColumns.salesRep && (
+                            <td>
+                              {isEditingRep ? (
+                                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                  <select 
+                                    value={selectedRepId} 
+                                    onChange={(e) => setSelectedRepId(e.target.value)}
+                                    className="page-size-select"
+                                  >
+                                    <option value="">-- Unassigned --</option>
+                                    {salesmenList.map(s => (
+                                      <option key={s.id} value={s.id}>{s.name}</option>
+                                    ))}
+                                  </select>
+                                  <button className="apply-filter-btn" style={{ padding: '4px 8px', fontSize: '11px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }} onClick={() => handleUpdateSalesman(order.id)}>Save</button>
+                                  <button style={{ padding: '4px 6px', fontSize: '11px', background: '#cbd5e1', border: 'none', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setEditingSalesmanOrderId(null)}>✕</button>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span className="salesman-tag">👤 {repName}</span>
+                                  <button 
+                                    className="filter-icon-btn" 
+                                    title="Edit Sales Rep"
+                                    onClick={() => {
+                                      setEditingSalesmanOrderId(order.id);
+                                      setSelectedRepId(order.salesman_id || '');
+                                    }}
+                                  >
+                                    ✏️
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          )}
+
                           {visibleColumns.type && <td><span className={`invoice-badge ${order.invoice_type === 'gst' ? 'gst' : 'estimate'}`}>{order.invoice_type === 'gst' ? 'GST' : 'Estimate'}</span></td>}
                           
                           {visibleColumns.saleStatus && (
@@ -726,8 +802,6 @@ export default function OrdersPage() {
         .status-badge.order-delivered { background: #e0f2fe; color: #0369a1; }
         .status-badge.order-confirmed { background: #f3e8ff; color: #6b21a8; }
         .status-badge.order-processing { background: #ffedd5; color: #c2410c; }
-
-        .pay-method-badge { background: #f8fafc; border: 1px solid #cbd5e1; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #334155; }
 
         .breakdown-cell { font-size: 12px; color: #334155; }
         .paid-line { color: #16a34a; margin-top: 2px; }
