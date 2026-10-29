@@ -511,8 +511,6 @@ export default function OrdersPage() {
         <div className="table-wrapper card">
           {loading && orders.length === 0 ? (
             <p className="loading-text">Loading order records...</p>
-          ) : orders.length === 0 ? (
-            <p className="empty-text">No orders match the selected criteria.</p>
           ) : (
             <>
               <div className="table-scroll-area">
@@ -617,96 +615,104 @@ export default function OrdersPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {orders.map(order => {
-                      const total = Number(order.total_amount || 0);
-                      const paid = Number(order.paid_amount || 0);
-                      const pending = Math.max(0, total - paid);
-                      const repName = order.salesman?.name || 'Unassigned';
-                      const sStatus = order.sale_status || 'completed';
-                      const pStatus = order.payment_status || (paid >= total ? 'paid' : paid > 0 ? 'partial' : 'pending');
-                      const oStatus = order.order_status || (sStatus === 'pre_order' ? 'processing' : 'delivered');
-                      const isEditingRep = editingSalesmanOrderId === order.id;
+                    {orders.length === 0 ? (
+                      <tr>
+                        <td colSpan={Object.values(visibleColumns).filter(Boolean).length} style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                          No orders match the selected criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      orders.map(order => {
+                        const total = Number(order.total_amount || 0);
+                        const paid = Number(order.paid_amount || 0);
+                        const pending = Math.max(0, total - paid);
+                        const repName = order.salesman?.name || 'Unassigned';
+                        const sStatus = order.sale_status || 'completed';
+                        const pStatus = order.payment_status || (paid >= total ? 'paid' : paid > 0 ? 'partial' : 'pending');
+                        const oStatus = order.order_status || (sStatus === 'pre_order' ? 'processing' : 'delivered');
+                        const isEditingRep = editingSalesmanOrderId === order.id;
 
-                      return (
-                        <tr key={order.id}>
-                          {visibleColumns.orderNumber && <td><strong>{order.order_number || '-'}</strong></td>}
-                          {visibleColumns.orderId && <td><span className="subtext">#{order.id.slice(0, 8)}</span></td>}
-                          {visibleColumns.date && (
-                            <td className="date-cell">
-                              {new Date(order.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}
-                            </td>
-                          )}
-                          {visibleColumns.customer && <td><strong>{order.customers?.name || 'Walk-in Customer'}</strong></td>}
-                          
-                          {visibleColumns.salesRep && (
-                            <td>
-                              {isEditingRep ? (
-                                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                                  <select 
-                                    value={selectedRepId} 
-                                    onChange={(e) => setSelectedRepId(e.target.value)}
-                                    className="page-size-select"
-                                  >
-                                    <option value="">-- Unassigned --</option>
-                                    {salesmenList.map(s => (
-                                      <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                  </select>
-                                  <button className="apply-filter-btn" style={{ padding: '4px 8px', fontSize: '11px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }} onClick={() => handleUpdateSalesman(order.id)}>Save</button>
-                                  <button style={{ padding: '4px 6px', fontSize: '11px', background: '#cbd5e1', border: 'none', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setEditingSalesmanOrderId(null)}>✕</button>
-                                </div>
-                              ) : (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span className="salesman-tag">👤 {repName}</span>
-                                  <button 
-                                    className="filter-icon-btn" 
-                                    title="Edit Sales Rep"
-                                    onClick={() => {
-                                      setEditingSalesmanOrderId(order.id);
-                                      setSelectedRepId(order.salesman_id || '');
-                                    }}
-                                  >
-                                    ✏️
-                                  </button>
-                                </div>
-                              )}
-                            </td>
-                          )}
+                        return (
+                          <tr key={order.id}>
+                            {visibleColumns.orderNumber && <td><strong>{order.order_number || '-'}</strong></td>}
+                            {visibleColumns.orderId && <td><span className="subtext">#{order.id.slice(0, 8)}</span></td>}
+                            {visibleColumns.date && (
+                              <td className="date-cell">
+                                {new Date(order.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '')}
+                              </td>
+                            )}
+                            {visibleColumns.customer && <td><strong>{order.customers?.name || 'Walk-in Customer'}</strong></td>}
+                            
+                            {visibleColumns.salesRep && (
+                              <td>
+                                {isEditingRep ? (
+                                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                    <select 
+                                      value={selectedRepId} 
+                                      onChange={(e) => setSelectedRepId(e.target.value)}
+                                      className="page-size-select"
+                                    >
+                                      <option value="">-- Unassigned --</option>
+                                      {salesmenList.map(s => (
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                      ))}
+                                    </select>
+                                    <button className="apply-filter-btn" style={{ padding: '4px 8px', fontSize: '11px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }} onClick={() => handleUpdateSalesman(order.id)}>Save</button>
+                                    <button style={{ padding: '4px 6px', fontSize: '11px', background: '#cbd5e1', border: 'none', borderRadius: '4px', cursor: 'pointer' }} onClick={() => setEditingSalesmanOrderId(null)}>✕</button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span className="salesman-tag">👤 {repName}</span>
+                                    <button 
+                                      className="filter-icon-btn" 
+                                      title="Edit Sales Rep"
+                                      onClick={() => {
+                                        setEditingSalesmanOrderId(order.id);
+                                        setSelectedRepId(order.salesman_id || '');
+                                      }}
+                                    >
+                                      ✏️
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            )}
 
-                          {visibleColumns.type && <td><span className={`invoice-badge ${order.invoice_type === 'gst' ? 'gst' : 'estimate'}`}>{order.invoice_type === 'gst' ? 'GST' : 'Estimate'}</span></td>}
-                          
-                          {visibleColumns.saleStatus && (
-                            <td>
-                              <span className={`status-badge sale-${sStatus}`}>{sStatus.replace('_', ' ')}</span>
-                            </td>
-                          )}
-                          {visibleColumns.paymentStatus && (
-                            <td>
-                              <span className={`status-badge payment-${pStatus}`}>{pStatus}</span>
-                            </td>
-                          )}
-                          {visibleColumns.orderStatus && (
-                            <td>
-                              <span className={`status-badge order-${oStatus}`}>{oStatus}</span>
-                            </td>
-                          )}
+                            {visibleColumns.type && <td><span className={`invoice-badge ${order.invoice_type === 'gst' ? 'gst' : 'estimate'}`}>{order.invoice_type === 'gst' ? 'GST' : 'Estimate'}</span></td>}
+                            
+                            {visibleColumns.saleStatus && (
+                              <td>
+                                <span className={`status-badge sale-${sStatus}`}>{sStatus.replace('_', ' ')}</span>
+                              </td>
+                            )}
+                            {visibleColumns.paymentStatus && (
+                              <td>
+                                <span className={`status-badge payment-${pStatus}`}>{pStatus}</span>
+                              </td>
+                            )}
+                            {visibleColumns.orderStatus && (
+                              <td>
+                                <span className={`status-badge order-${oStatus}`}>{oStatus}</span>
+                              </td>
+                            )}
 
-                          {visibleColumns.breakdown && (
-                            <td className="breakdown-cell">
-                              <div><span>Total: </span><strong>₹{total.toFixed(2)}</strong></div>
-                              <div className="paid-line"><span>Paid: </span><strong>₹{paid.toFixed(2)}</strong></div>
-                              {pending > 0 && <div className="pending-line"><span>Pending: </span><strong>₹{pending.toFixed(2)}</strong></div>}
-                            </td>
-                          )}
+                            {visibleColumns.breakdown && (
+                              <td className="breakdown-cell">
+                                <div><span>Total: </span><strong>₹{total.toFixed(2)}</strong></div>
+                                <div className="paid-line"><span>Paid: </span><strong>₹{paid.toFixed(2)}</strong></div>
+                                {pending > 0 && <div className="pending-line"><span>Pending: </span><strong>₹{pending.toFixed(2)}</strong></div>}
+                              </td>
+                            )}
 
-                          {visibleColumns.actions && (
-                            <td>
-                              <button className="reprint-btn" onClick={() => handleReprint(order)}>🖨️ Reprint</button>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
+                            {visibleColumns.actions && (
+                              <td>
+                                <button className="reprint-btn" onClick={() => handleReprint(order)}>🖨️ Reprint</button>
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -719,7 +725,7 @@ export default function OrdersPage() {
                     <option value={25}>25 per page</option>
                     <option value={50}>50 per page</option>
                   </select>
-                  <span>Showing <strong>{((currentPage - 1) * pageSize) + 1}</strong> - <strong>{Math.min(currentPage * pageSize, totalCount)}</strong> of <strong>{totalCount}</strong></span>
+                  <span>Showing <strong>{totalCount > 0 ? ((currentPage - 1) * pageSize) + 1 : 0}</strong> - <strong>{Math.min(currentPage * pageSize, totalCount)}</strong> of <strong>{totalCount}</strong></span>
                 </div>
                 <div className="pagination-controls">
                   <button disabled={currentPage === 1 || loading} onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} className="page-btn">◀ Previous</button>
