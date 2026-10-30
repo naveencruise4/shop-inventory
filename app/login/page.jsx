@@ -1,9 +1,7 @@
 'use client';
-
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import Link from 'next/link';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -15,27 +13,60 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      alert(`Login failed: ${error.message}`);
-    } else {
-      document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=28800; SameSite=Lax`;
-      router.push('/pos');
+      if (error) throw error;
+
+      if (data?.session) {
+        // Force a brief pause to allow cookie synchronization to complete for middleware
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        router.refresh();
+        window.location.href = '/pos'; // Force full window navigation to guarantee cookie transmission
+      }
+    } catch (err) {
+      alert(`Login failed: ${err.message}`);
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-      <form onSubmit={handleLogin} style={{ background: '#fff', padding: '30px', borderRadius: '8px', width: '300px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
-        <h2 style={{ marginTop: 0 }}>Login</h2>
-        <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ width: '100%', padding: '10px', marginBottom: '10px', boxSizing: 'border-box' }} />
-        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ width: '100%', padding: '10px', marginBottom: '15px', boxSizing: 'border-box' }} />
-        <button disabled={loading} style={{ width: '100%', padding: '10px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-          {loading ? 'Signing in...' : 'Sign In'}
+    <div className="flex min-h-screen items-center justify-center bg-slate-100">
+      <form onSubmit={handleLogin} className="bg-white p-8 rounded-xl shadow-md w-96 space-y-4">
+        <h2 className="text-xl font-bold text-slate-800">i2Integrate POS Login</h2>
+        
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full border border-slate-300 rounded p-2 text-sm focus:outline-none focus:border-emerald-500"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full border border-slate-300 rounded p-2 text-sm focus:outline-none focus:border-emerald-500"
+            required
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-emerald-600 text-white font-bold p-2 rounded text-sm hover:bg-emerald-700 transition"
+        >
+          {loading ? 'Signing In...' : 'Sign In'}
         </button>
-        <p style={{ fontSize: '13px', marginTop: '15px' }}>Need an account? <Link href="/signup">Register Shop</Link></p>
       </form>
     </div>
   );

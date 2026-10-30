@@ -3,7 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import Sidebar from '@/components/Sidebar';
+//import Sidebar from '@/components/Sidebar';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function ProductsPage() {
@@ -395,7 +395,7 @@ export default function ProductsPage() {
 
   return (
     <div className="layout">
-      <Sidebar />
+
       <main className="content">
         {selectedProduct ? (
           <div className="details-wrapper">

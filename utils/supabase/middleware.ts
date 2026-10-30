@@ -27,23 +27,28 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // IMPORTANT: Do not run logic between createServerClient and getUser()
+  // Fetch current user session
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const pathname = request.nextUrl.pathname
-  const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/signup')
+  // Check if any Supabase auth cookies exist in request
+  const allCookies = request.cookies.getAll()
+  const hasSupabaseCookie = allCookies.some((c) => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'))
 
-  // 1. If user is NOT signed in and trying to access protected pages -> redirect to /login
-  if (!user && !isAuthPage && !pathname.startsWith('/auth')) {
+  const isAuthPage =
+    request.nextUrl.pathname.startsWith('/login') ||
+    request.nextUrl.pathname.startsWith('/signup')
+
+  // If no user AND no auth cookie is present, redirect to /login
+  if (!user && !hasSupabaseCookie && !isAuthPage && !request.nextUrl.pathname.startsWith('/api')) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  // 2. If user IS signed in and trying to access /login or /signup -> redirect to /dashboard
-  if (user && isAuthPage) {
+  // If user IS authenticated and on /login, redirect to /dashboard
+  if ((user || hasSupabaseCookie) && isAuthPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
