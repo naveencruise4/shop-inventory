@@ -60,7 +60,11 @@ export default function ProductsPage() {
     hsn_code: '',
     selling_price: '',
     staff_price: '',
-    final_price: ''
+    final_price: '',
+    purchase_tax_mode: 'estimate',
+    purchase_gst_percentage: '',
+    selling_tax_mode: 'estimate',
+    gst_percentage: ''
   });
 
   const [restock, setRestock] = useState({ quantity: '', purchase_price: '', supplier_name: '', purchase_date: new Date().toISOString().split('T')[0] });
@@ -275,14 +279,21 @@ export default function ProductsPage() {
     e.preventDefault();
     if (!selectedProduct) return;
 
+    const hasPurchaseGst = editProd.purchase_tax_mode === 'gst';
+    const hasSellingGst = editProd.selling_tax_mode === 'gst';
+
     const { error } = await supabase.from('productsinfo').update({
       name: editProd.name.trim(),
       brand_name: editProd.brand_name?.trim() || null,
       category_name: editProd.category_name.trim(),
-      hsn_code: editProd.hsn_code?.trim() || null,
+      hsn_code: hasSellingGst ? (editProd.hsn_code?.trim() || null) : null,
       selling_price: Number(editProd.selling_price),
       staff_price: editProd.staff_price !== '' ? Number(editProd.staff_price) : null,
-      final_price: editProd.final_price !== '' ? Number(editProd.final_price) : null
+      final_price: editProd.final_price !== '' ? Number(editProd.final_price) : null,
+      has_purchase_gst: hasPurchaseGst,
+      purchase_gst_percentage: hasPurchaseGst ? Number(editProd.purchase_gst_percentage) : 0.00,
+      has_gst: hasSellingGst,
+      gst_percentage: hasSellingGst ? Number(editProd.gst_percentage) : 0.00
     }).eq('id', selectedProduct.id);
 
     if (error) {
@@ -435,7 +446,11 @@ export default function ProductsPage() {
                       hsn_code: selectedProduct.hsn_code || '',
                       selling_price: selectedProduct.selling_price || 0,
                       staff_price: selectedProduct.staff_price ?? '',
-                      final_price: selectedProduct.final_price ?? ''
+                      final_price: selectedProduct.final_price ?? '',
+                      purchase_tax_mode: selectedProduct.has_purchase_gst ? 'gst' : 'estimate',
+                      purchase_gst_percentage: String(selectedProduct.purchase_gst_percentage || '0'),
+                      selling_tax_mode: selectedProduct.has_gst ? 'gst' : 'estimate',
+                      gst_percentage: String(selectedProduct.gst_percentage || '0')
                     });
                     setShowEditModal(true);
                   }}>✎ Edit Product Details</button>
@@ -866,7 +881,7 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Edit Product Modal (Excluding Total Stock) */}
+{/* Edit Product Modal (Excluding Total Stock) */}
         {showEditModal && (
           <div className="modal-overlay">
             <div className="modal">
@@ -891,9 +906,25 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label>HSN Code</label>
-                  <input type="text" placeholder="HSN..." value={editProd.hsn_code} onChange={(e) => setEditProd({ ...editProd, hsn_code: e.target.value })} />
+                <div className="tax-panel purchase-tax-panel">
+                  <label className="panel-title">Purchase Tax Type</label>
+                  <div className="segmented-control">
+                    <button type="button" className={editProd.purchase_tax_mode === 'estimate' ? 'active' : ''} onClick={() => setEditProd({ ...editProd, purchase_tax_mode: 'estimate' })}>Estimate / Non-GST</button>
+                    <button type="button" className={editProd.purchase_tax_mode === 'gst' ? 'active' : ''} onClick={() => setEditProd({ ...editProd, purchase_tax_mode: 'gst' })}>Tax Invoice (GST)</button>
+                  </div>
+
+                  {editProd.purchase_tax_mode === 'gst' && (
+                    <div className="tax-details">
+                      <label>Purchase GST Rate (%)</label>
+                      <select value={editProd.purchase_gst_percentage} onChange={(e) => setEditProd({ ...editProd, purchase_gst_percentage: e.target.value })}>
+                        <option value="0">0% (Zero-rated)</option>
+                        <option value="5">5% GST</option>
+                        <option value="12">12% GST</option>
+                        <option value="18">18% GST</option>
+                        <option value="28">28% GST</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 <div className="form-row">
@@ -910,6 +941,35 @@ export default function ProductsPage() {
                 <div className="form-group">
                   <label>Final Price (Lowest Floor Discount) (₹)</label>
                   <input type="number" step="0.01" placeholder="Absolute final discount price..." value={editProd.final_price} onChange={(e) => setEditProd({ ...editProd, final_price: e.target.value })} />
+                </div>
+
+                <div className="tax-panel selling-tax-panel">
+                  <label className="panel-title">Selling Tax Type</label>
+                  <div className="segmented-control">
+                    <button type="button" className={editProd.selling_tax_mode === 'estimate' ? 'active' : ''} onClick={() => setEditProd({ ...editProd, selling_tax_mode: 'estimate' })}>Estimate / Non-GST</button>
+                    <button type="button" className={editProd.selling_tax_mode === 'gst' ? 'active' : ''} onClick={() => setEditProd({ ...editProd, selling_tax_mode: 'gst' })}>Tax Invoice (GST)</button>
+                  </div>
+
+                  {editProd.selling_tax_mode === 'gst' && (
+                    <div className="tax-details">
+                      <div className="form-row" style={{ marginTop: '6px' }}>
+                        <div className="form-group">
+                          <label>HSN Code</label>
+                          <input placeholder="e.g. 1006 / 8517" value={editProd.hsn_code} onChange={(e) => setEditProd({ ...editProd, hsn_code: e.target.value })} />
+                        </div>
+                        <div className="form-group">
+                          <label>Selling GST Rate (%)</label>
+                          <select value={editProd.gst_percentage} onChange={(e) => setEditProd({ ...editProd, gst_percentage: e.target.value })}>
+                            <option value="0">0% (Zero-rated)</option>
+                            <option value="5">5% GST</option>
+                            <option value="12">12% GST</option>
+                            <option value="18">18% GST</option>
+                            <option value="28">28% GST</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="modal-actions">

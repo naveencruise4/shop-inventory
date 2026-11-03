@@ -10,6 +10,19 @@ export default function Sidebar() {
   const router = useRouter();
   const [shopName, setShopName] = useState('InventoryApp');
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isSalesOpen, setIsSalesOpen] = useState(false);
+  const [isPurchasesOpen, setIsPurchasesOpen] = useState(false);
+  const [isReportsOpen, setIsReportsOpen] = useState(false);
+
+  // Auto-expand sales or purchases dropdown if currently on a subpage
+  useEffect(() => {
+    if (pathname?.startsWith('/orders') || pathname?.startsWith('/sales')) {
+      setIsSalesOpen(true);
+    }
+    if (pathname?.startsWith('/purchases')) {
+      setIsPurchasesOpen(true);
+    }
+  }, [pathname]);
 
   useEffect(() => {
     fetchShopName();
@@ -42,15 +55,6 @@ export default function Sidebar() {
     }
   };
 
-  const navItems = [
-  //  { label: 'Dashboard', icon: '📊', href: '/dashboard' },
-    { label: 'POS', icon: '🛒', href: '/pos' },
-    { label: 'Products', icon: '📦', href: '/products' },
-    { label: 'Orders', icon: '📋', href: '/orders' },
-    { label: 'Ledger', icon: '📖', href: '/ledger' },
-    { label: 'Settings', icon: '⚙️', href: '/settings' },
-  ];
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/login');
@@ -72,17 +76,152 @@ export default function Sidebar() {
           </div>
           
           <nav>
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`nav-item ${pathname === item.href ? 'active' : ''}`}
-                title={isCollapsed ? item.label : ''}
+            <Link
+              href="/pos"
+              className={`nav-item ${pathname === '/pos' ? 'active' : ''}`}
+              title={isCollapsed ? 'POS' : ''}
+            >
+              <span className="nav-icon">🛒</span>
+              {!isCollapsed && <span className="nav-label">POS Checkout</span>}
+            </Link>
+
+            <Link
+              href="/products"
+              className={`nav-item ${pathname === '/products' ? 'active' : ''}`}
+              title={isCollapsed ? 'Products' : ''}
+            >
+              <span className="nav-icon">📦</span>
+              {!isCollapsed && <span className="nav-label">Products</span>}
+            </Link>
+
+            {/* Sales Dropdown Menu */}
+            <div className="nav-dropdown-container">
+              <div
+                className={`nav-item dropdown-toggle ${(pathname?.startsWith('/orders') || pathname?.startsWith('/sales')) ? 'active-parent' : ''}`}
+                onClick={() => {
+                  if (isCollapsed) setIsCollapsed(false);
+                  setIsSalesOpen(!isSalesOpen);
+                }}
+                title={isCollapsed ? 'Sales' : ''}
               >
-                <span className="nav-icon">{item.icon}</span>
-                {!isCollapsed && <span className="nav-label">{item.label}</span>}
-              </Link>
-            ))}
+                <span className="nav-icon">📋</span>
+                {!isCollapsed && (
+                  <>
+                    <span className="nav-label" style={{ flex: 1 }}>Sales</span>
+                    <span className="dropdown-arrow">{isSalesOpen ? '▼' : '▶'}</span>
+                  </>
+                )}
+              </div>
+
+              {(!isCollapsed && isSalesOpen) && (
+                <div className="sub-nav">
+                  <Link
+                    href="/sales/salesbill"
+                    className={`nav-sub-item ${pathname === '/sales/salesbill' ? 'active' : ''}`}
+                  >
+                    📄 Sales Bill
+                  </Link>
+                  <Link
+                    href="/sales/salesorder"
+                    className={`nav-sub-item ${pathname === '/sales/salesorder' ? 'active' : ''}`}
+                  >
+                    📦 Sales Order
+                  </Link>
+                </div>
+              )}
+            </div>
+
+            {/* Purchases Dropdown Menu */}
+            <div className="nav-dropdown-container">
+              <div
+                className={`nav-item dropdown-toggle ${pathname?.startsWith('/purchases') ? 'active-parent' : ''}`}
+                onClick={() => {
+                  if (isCollapsed) setIsCollapsed(false);
+                  setIsPurchasesOpen(!isPurchasesOpen);
+                }}
+                title={isCollapsed ? 'Purchases' : ''}
+              >
+                <span className="nav-icon">🛒</span>
+                {!isCollapsed && (
+                  <>
+                    <span className="nav-label" style={{ flex: 1 }}>Purchases</span>
+                    <span className="dropdown-arrow">{isPurchasesOpen ? '▼' : '▶'}</span>
+                  </>
+                )}
+              </div>
+
+              {(!isCollapsed && isPurchasesOpen) && (
+                <div className="sub-nav">
+                  <Link
+                    href="/purchases/bills"
+                    className={`nav-sub-item ${pathname === '/purchases/bills' ? 'active' : ''}`}
+                  >
+                    📥 Purchase Bills
+                  </Link>
+                  <Link
+                    href="/purchases/ledger"
+                    className={`nav-sub-item ${pathname === '/purchases/ledger' ? 'active' : ''}`}
+                  >
+                    📒 Supplier Ledger
+                  </Link>
+                </div>
+              )}
+            </div>
+
+            {/* Reports Dropdown Menu */}
+            <div className="nav-dropdown-container">
+              <div
+                className={`nav-item dropdown-toggle ${pathname?.startsWith('/reports') ? 'active-parent' : ''}`}
+                onClick={() => {
+                  if (isCollapsed) setIsCollapsed(false);
+                  setIsReportsOpen(!isReportsOpen);
+                }}
+                title={isCollapsed ? 'Purchases' : ''}
+              >
+                <span className="nav-icon">🛒</span>
+                {!isCollapsed && (
+                  <>
+                    <span className="nav-label" style={{ flex: 1 }}>Reports</span>
+                    <span className="dropdown-arrow">{isReportsOpen ? '▼' : '▶'}</span>
+                  </>
+                )}
+              </div>
+
+              {(!isCollapsed && isReportsOpen) && (
+                <div className="sub-nav">
+                  <Link
+                    href="/reports/daybook"
+                    className={`nav-sub-item ${pathname === '/reports/daybook' ? 'active' : ''}`}
+                  >
+                    📖 Day Book
+                  </Link>
+                  <Link
+                    href="/reports/gst"
+                    className={`nav-sub-item ${pathname === '/reports/gst' ? 'active' : ''}`}
+                  >
+                    📑 GST Reports
+                  </Link>
+                </div>
+              )}
+            </div>
+
+            {/* <Link
+              href="/ledger"
+              className={`nav-item ${pathname === '/ledger' ? 'active' : ''}`}
+              title={isCollapsed ? 'Ledger' : ''}
+            >
+              <span className="nav-icon">📖</span>
+              {!isCollapsed && <span className="nav-label">Ledger</span>}
+            </Link> */}
+
+            <Link
+              href="/settings"
+              className={`nav-item ${pathname === '/settings' ? 'active' : ''}`}
+              title={isCollapsed ? 'Settings' : ''}
+            >
+              <span className="nav-icon">⚙️</span>
+              {!isCollapsed && <span className="nav-label">Settings</span>}
+            </Link>
           </nav>
         </div>
         
@@ -162,6 +301,40 @@ export default function Sidebar() {
           align-items: center;
           gap: 12px;
           white-space: nowrap;
+          cursor: pointer;
+        }
+
+        .dropdown-toggle {
+          user-select: none;
+        }
+
+        .dropdown-arrow {
+          font-size: 10px;
+          color: #64748b;
+        }
+
+        .sub-nav {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          padding-left: 32px;
+          margin: 2px 0 6px 0;
+        }
+
+        .nav-sub-item {
+          color: #94a3b8;
+          text-decoration: none;
+          padding: 6px 10px;
+          border-radius: 4px;
+          font-size: 12px;
+          transition: background 0.2s, color 0.2s;
+          white-space: nowrap;
+        }
+
+        .nav-sub-item:hover,
+        .nav-sub-item.active {
+          background: #1e293b;
+          color: #38bdf8;
         }
 
         .nav-icon {
@@ -171,7 +344,8 @@ export default function Sidebar() {
         }
 
         :global(.nav-item:hover),
-        :global(.nav-item.active) {
+        :global(.nav-item.active),
+        :global(.nav-item.active-parent) {
           background: #1e293b;
           color: #fff;
         }
@@ -221,7 +395,7 @@ export default function Sidebar() {
           }
 
           .sidebar-top-row, .logout-section {
-            display: none; /* Hidden on mobile to keep bottom bar compact */
+            display: none;
           }
 
           nav {
@@ -229,6 +403,10 @@ export default function Sidebar() {
             justify-content: space-around;
             width: 100%;
             gap: 0;
+          }
+
+          .sub-nav {
+            display: none !important; /* Hide dropdown list on mobile bottom bar */
           }
 
           :global(.nav-item) {
@@ -247,7 +425,8 @@ export default function Sidebar() {
             font-size: 18px;
           }
 
-          :global(.nav-item.active) {
+          :global(.nav-item.active),
+          :global(.nav-item.active-parent) {
             color: #38bdf8;
             font-weight: 600;
           }

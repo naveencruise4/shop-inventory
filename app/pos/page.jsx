@@ -18,7 +18,7 @@ export default function POSPage() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
-  const [newCust, setNewCust] = useState({ name: '', phone: '', email: '' });
+  const [newCust, setNewCust] = useState({ name: '', phone: '', email: '', type: 'consumer', gstin: '', address: '' });
 
   const [customerSearchResults, setCustomerSearchResults] = useState([]);
   const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
@@ -30,7 +30,7 @@ export default function POSPage() {
   const [showSalesmanDropdown, setShowSalesmanDropdown] = useState(false);
 
   // Order Options
-  const [orderType, setOrderType] = useState('sale'); // 'sale' | 'pre_order'
+  const [orderType, setOrderType] = useState(''); // 'sale' | 'pre_order'
   const [billingMode, setBillingMode] = useState('auto_split');
 
   // Pre-Order Conversion & Internal Search State
@@ -38,6 +38,7 @@ export default function POSPage() {
   const [preOrderSearch, setPreOrderSearch] = useState('');
   const [showPreOrderModal, setShowPreOrderModal] = useState(false);
   const [convertingPreOrder, setConvertingPreOrder] = useState(null);
+  //const [convertingPreModel, setConvertingPreModel] = useState(null);
 
   // POS Cart State
   const [cart, setCart] = useState([]);
@@ -60,6 +61,10 @@ export default function POSPage() {
   const [completedGstOrder, setCompletedGstOrder] = useState(null);
   const [completedEstimateOrder, setCompletedEstimateOrder] = useState(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+
+  // New state declarations in POSPage
+  const [billingType, setBillingType] = useState('b2c'); // 'b2b' or 'b2c'
+  const [billComments, setBillComments] = useState('');
 
   useEffect(() => {
     fetchInitialData();
@@ -122,20 +127,18 @@ export default function POSPage() {
 
   const fetchPendingPreOrders = async (sid) => {
     const { data } = await supabase
-      .from('sales')
+      .from('sales_order')
       .select('*, customers(name, phone), sale_items(*)')
       .eq('shop_id', sid)
-      .eq('sale_status', 'pre_order')
+      .eq('conversion_status', 'open')
       .order('created_at', { ascending: false });
 
     if (data) setPendingPreOrders(data);
   };
 
-  // 1. Debounced effect: fires Supabase query 400ms after user stops typing
   useEffect(() => {
     const phoneTerm = customerSearch.trim();
 
-    // Don't search if field is empty or less than 3 characters
     if (!shopInfo.id || phoneTerm.length < 3) {
       setCustomerSearchResults([]);
       setIsSearchingCustomer(false);
@@ -159,9 +162,8 @@ export default function POSPage() {
       } finally {
         setIsSearchingCustomer(false);
       }
-    }, 400); // Waits 400ms of typing pause before hitting Supabase
+    }, 400);
 
-    // Cleanup timer if user types another character before 400ms expires
     return () => clearTimeout(timerId);
   }, [customerSearch, shopInfo.id]);
 
@@ -219,6 +221,7 @@ export default function POSPage() {
     if (!q) return true;
     return (
       po.id.toLowerCase().includes(q) ||
+      po.booking_number?.toLowerCase().includes(q) ||
       po.customers?.name?.toLowerCase().includes(q) ||
       po.customers?.phone?.includes(q)
     );
@@ -228,11 +231,19 @@ export default function POSPage() {
     e.preventDefault();
     if (!shopInfo.id) return;
 
+    if (newCust.type === 'business' && (!newCust.gstin || !newCust.address)) {
+      alert('⚠️ GSTIN and Address are mandatory for Business (B2B) customers.');
+      return;
+    }
+
     const { data: newCustomerData, error } = await supabase.from('customers').insert([{
       shop_id: shopInfo.id,
       name: newCust.name,
       phone: newCust.phone,
-      email: newCust.email
+      email: newCust.email,
+      type: newCust.type,
+      gstin: newCust.gstin,
+      address: newCust.address
     }]).select().single();
 
     if (error) {
@@ -246,7 +257,7 @@ export default function POSPage() {
     setSelectedCustomer(newCustomerData);
     setCustomerSearch(`${newCustomerData.name} (${newCustomerData.phone})`);
     setShowNewCustomerModal(false);
-    setNewCust({ name: '', phone: '', email: '' });
+    setNewCust({ name: '', phone: '', email: '', type: 'consumer', gstin: '', address: '' });
   };
 
   const handleCreateSalesman = async () => {
@@ -286,16 +297,6 @@ export default function POSPage() {
       return;
     }
 
-    if (convertingPreOrder) {
-      const totalStock = Number(product.total_stock || 0);
-      const deliveredStock = Number(product.delivered_stock || 0);
-      const physicalHeadroom = totalStock - deliveredStock;
-      if (physicalHeadroom <= 0) {
-        alert('Cannot fulfill pre-order: No physical stock available (Total Stock <= Delivered Stock). Please receive supplier stock first.');
-        return;
-      }
-    }
-
     const hasGst = product.has_gst ?? false;
     const gstPct = Number(product.gst_percentage || 0);
     const unitType = product.unit || product.unit_name || 'Nos';
@@ -309,16 +310,6 @@ export default function POSPage() {
       if (orderType === 'sale' && !convertingPreOrder && nextQty > Number(product.available_stock || 0)) {
         alert(`Cannot add more. Only ${product.available_stock} units available.`);
         return;
-      }
-
-      if (convertingPreOrder) {
-        const totalStock = Number(product.total_stock || 0);
-        const deliveredStock = Number(product.delivered_stock || 0);
-        const physicalHeadroom = totalStock - deliveredStock;
-        if (nextQty > physicalHeadroom) {
-          alert(`Cannot fulfill more than available physical stock headroom (${physicalHeadroom} units).`);
-          return;
-        }
       }
 
       updatedCart[existingIndex].quantity = nextQty;
@@ -351,16 +342,6 @@ export default function POSPage() {
           return item;
         }
 
-        if (convertingPreOrder) {
-          const totalStock = Number(item.total_stock || 0);
-          const deliveredStock = Number(item.delivered_stock || 0);
-          const physicalHeadroom = totalStock - deliveredStock;
-          if (newQty > physicalHeadroom) {
-            alert(`Only ${physicalHeadroom} units of physical stock available for fulfillment.`);
-            return item;
-          }
-        }
-
         return newQty > 0 ? { ...item, quantity: newQty } : null;
       }
       return item;
@@ -376,17 +357,6 @@ export default function POSPage() {
           alert(`Only ${item.available_stock} units available in stock.`);
           return { ...item, quantity: Number(item.available_stock) };
         }
-
-        if (convertingPreOrder) {
-          const totalStock = Number(item.total_stock || 0);
-          const deliveredStock = Number(item.delivered_stock || 0);
-          const physicalHeadroom = totalStock - deliveredStock;
-          if (newQty > physicalHeadroom) {
-            alert(`Only ${physicalHeadroom} units of physical stock available for fulfillment.`);
-            return { ...item, quantity: physicalHeadroom };
-          }
-        }
-
         return { ...item, quantity: newQty };
       }
       return item;
@@ -433,7 +403,6 @@ export default function POSPage() {
     return Math.ceil(subtotal);
   };
 
-  // Pre-Order Calculations
   const finalTotal = getFinalTotal();
   const alreadyPaidAdvance = convertingPreOrder ? Number(convertingPreOrder.paid_amount || 0) : 0;
   const netOutstandingDue = Math.max(0, finalTotal - alreadyPaidAdvance);
@@ -475,6 +444,7 @@ export default function POSPage() {
         sku: si.sku,
         name: si.name || liveProduct?.name || si.sku,
         unit: si.unit || liveProduct?.unit || 'Nos',
+        hsn_code: si.hsn_code || liveProduct?.hsn_code || null, // <--- Ensure HSN code is pulled into cart items here
         quantity: si.quantity,
         price: si.unit_price,
         originalPrice: si.unit_price,
@@ -490,167 +460,82 @@ export default function POSPage() {
     setCart(loadedItems);
     setCustomGrandTotal('');
     
-    const balance = po.total_amount - (po.paid_amount || 0);
-    setAmountPaid(balance > 0 ? balance.toString() : '0');
+    // Changed from auto-filling the balance to leaving it empty/zero for user entry
+    setAmountPaid('');
+    
     setOrderType('sale');
     setShowPreOrderModal(false);
   };
 
-  const handleCheckout = async () => {
+const handleCheckout = async () => {
     if (cart.length === 0) return;
 
-    if (orderType === 'sale' && !convertingPreOrder && amountPaid === '') {
-      alert('⚠️ Please enter the amount paid by the customer.');
-      return;
-    }
-
-    const enteredPaid = amountPaid !== '' ? Number(amountPaid) : (orderType === 'pre_order' ? 0 : 0);
-    if (orderType === 'sale' && !convertingPreOrder && Math.abs(enteredPaid - finalTotal) > 0.01) {
-      alert(
-         `⚠️ Amount Mismatch Warning!\n\nAmount Paid (₹${enteredPaid.toFixed(2)}) does not equal Final Payable Amount (₹${finalTotal.toFixed(2)}).`
-      );
-      return;
-    }
-
+    const enteredPaid = amountPaid !== '' ? Number(amountPaid) : 0;
     setIsCheckingOut(true);
 
     try {
       if (!shopInfo.id) return;
 
-      const totalPaidAfterThisPayment = alreadyPaidAdvance + enteredPaid;
-      const isClosingPreOrder = Boolean(
-        convertingPreOrder && totalPaidAfterThisPayment >= finalTotal - 0.01
-      );
+      const hasAnyGstItem = cart.some(item => item.has_gst && Number(item.gst_percentage || 0) > 0);
+      let targetInvoiceType = 'estimate';
+      if (billingMode === 'gst_only') targetInvoiceType = 'gst';
+      else if (billingMode === 'auto_split' && hasAnyGstItem) targetInvoiceType = 'gst';
 
-      if (isClosingPreOrder) {
-        const requestedByProduct = new Map();
-        for (const item of cart) {
-          const productId = item.id;
-          const quantity = Number(item.quantity);
-          if (!productId || !Number.isFinite(quantity) || quantity <= 0) {
-            alert(`Invalid quantity for ${item.name || 'a cart item'}. Please correct it before closing the pre-order.`);
-            return;
-          }
-          requestedByProduct.set(
-            productId,
-            (requestedByProduct.get(productId) || 0) + quantity
-          );
+      const isGstBatch = targetInvoiceType === 'gst';
+
+      const itemsPayload = cart.map(item => {
+        const pct = Number(item.gst_percentage || 0);
+        const isTaxed = isGstBatch && item.has_gst && pct > 0;
+        const baseUnitPrice = isTaxed ? Number((item.price / (1 + pct / 100)).toFixed(2)) : item.price;
+        const unitGstAmount = isTaxed ? Number((item.price - baseUnitPrice).toFixed(2)) : 0;
+
+        return {
+          product_id: item.id,
+          sku: item.sku,
+          name: item.name,
+          unit: item.unit,
+          hsn_code: item.hsn_code,
+          quantity: item.quantity,
+          price: item.price,
+          unit_price: item.price,
+          has_gst: isTaxed,
+          gst_percentage: pct,
+          base_price: baseUnitPrice,
+          gst_amount: unitGstAmount * item.quantity
+        };
+      });
+
+      const totalPaidSoFar = convertingPreOrder ? alreadyPaidAdvance + enteredPaid : enteredPaid;
+
+// --- PATH 1: Additional Part-Payment on Existing Pre-Order (Remains Open Pre-Order) ---
+      if (convertingPreOrder && totalPaidSoFar < finalTotal) {
+        const { error: updateError } = await supabase
+          .from('sales_order')
+          .update({ paid_amount: totalPaidSoFar })
+          .eq('id', convertingPreOrder.id);
+
+        if (updateError) throw updateError;
+
+        if (enteredPaid > 0) {
+          const { error: paymentError } = await supabase
+            .from('sale_payments')
+            .insert({
+              shop_id: shopInfo.id,
+              sales_order_id: convertingPreOrder.id,
+              sale_id: null,
+              amount: enteredPaid,
+              payment_method: paymentMethod || 'cash',
+              transaction_type: 'receipt'
+            });
+
+          if (paymentError) throw paymentError;
         }
 
-        const productIds = [...requestedByProduct.keys()];
-        const { data: liveStock, error: stockError } = await supabase
-          .from('vw_product_stock')
-          .select('id, name, total_stock, delivered_stock, available_stock')
-          .eq('shop_id', shopInfo.id)
-          .in('id', productIds);
-
-        if (stockError) throw new Error(`Could not validate stock before closing the pre-order: ${stockError.message}`);
-
-        const stockById = new Map((liveStock || []).map(product => [product.id, product]));
-        const insufficientItems = [];
-
-        for (const [productId, requestedQty] of requestedByProduct.entries()) {
-          const product = stockById.get(productId);
-          if (!product) {
-            insufficientItems.push(`${cart.find(item => item.id === productId)?.name || productId}: stock record not found`);
-            continue;
-          }
-
-          const physicalHeadroom = Number(product.total_stock || 0) - Number(product.delivered_stock || 0);
-          if (requestedQty > physicalHeadroom + 0.0001) {
-            insufficientItems.push(
-              `${product.name || cart.find(item => item.id === productId)?.name || productId}: requested ${requestedQty}, physically available ${Math.max(0, physicalHeadroom)}`
-            );
-          }
-        }
-
-        if (insufficientItems.length > 0) {
-          alert(
-            `Cannot close this pre-order because there is insufficient physical stock for:\n\n${insufficientItems.join('\n')}\n\nThe pre-order will remain open. Receive the missing stock before completing fulfillment.`
-          );
-          setIsCheckingOut(false);
-          return;
-        }
-      }
-
-      let createdGstOrder = null;
-      let createdEstimateOrder = null;
-
-      let willBeCompleted = false;
-      if (orderType === 'pre_order') {
-        willBeCompleted = false;
-      } else if (convertingPreOrder) {
-        willBeCompleted = totalPaidAfterThisPayment >= finalTotal - 0.01;
-      } else {
-        willBeCompleted = true;
-      }
-
-      const shouldUseAutoSplit = billingMode === 'auto_split' && willBeCompleted;
-
-      if (!shouldUseAutoSplit) {
-        const hasAnyGstItem = cart.some(item => item.has_gst && Number(item.gst_percentage || 0) > 0);
-        let targetInvoiceType = 'estimate';
-        if (billingMode === 'gst_only') targetInvoiceType = 'gst';
-        else if (billingMode === 'auto_split' && hasAnyGstItem && willBeCompleted) targetInvoiceType = 'gst';
-
-        const isGstBatch = targetInvoiceType === 'gst';
+        // Construct receipt preview for part-payment update
         const { totalBase, totalGst } = calculateTotalGSTBreakdown(cart);
-
-        const itemsPayload = cart.map(item => {
-          const pct = Number(item.gst_percentage || 0);
-          const isTaxed = isGstBatch && item.has_gst && pct > 0;
-          const baseUnitPrice = isTaxed ? Number((item.price / (1 + pct / 100)).toFixed(2)) : item.price;
-          const unitGstAmount = isTaxed ? Number((item.price - baseUnitPrice).toFixed(2)) : 0;
-
-          return {
-            product_id: item.id,
-            sku: item.sku,
-            name: item.name,
-            unit: item.unit,
-            quantity: item.quantity,
-            price: item.price,
-            unit_price: item.price,
-            has_gst: isTaxed,
-            gst_percentage: pct,
-            base_price: baseUnitPrice,
-            gst_amount: unitGstAmount * item.quantity
-          };
-        });
-
-        let finalStatus = orderType === 'pre_order' ? 'pre_order' : saleStatus;
-        let totalPaidSoFar = enteredPaid;
-        if (convertingPreOrder) {
-          totalPaidSoFar = alreadyPaidAdvance + enteredPaid;
-          if (totalPaidSoFar < finalTotal) finalStatus = 'pre_order';
-          else {
-            finalStatus = 'completed';
-          }
-        }
-
-        const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
-          p_shop_id: shopInfo.id,
-          p_customer_id: selectedCustomer?.id || null,
-          p_total_amount: finalTotal,
-          p_items: itemsPayload,
-          p_amount_paid: enteredPaid,
-          p_payment_method: paymentMethod || 'cash',
-          p_sale_status: finalStatus,
-          p_salesman_id: selectedSalesman?.id || null,
-          p_invoice_type: isGstBatch ? 'gst' : 'estimate',
-          p_existing_sale_id: convertingPreOrder ? convertingPreOrder.id : null
-        });
-
-        if (rpcError) throw rpcError;
-
-        let fetchedOrderNumber = null;
-        if (saleId) {
-          const { data: saleData } = await supabase.from('sales').select('order_number').eq('id', saleId).single();
-          fetchedOrderNumber = saleData?.order_number || null;
-        }
-
-        const singleOrderResult = {
-          saleId,
-          orderNumber: fetchedOrderNumber,
+        const partPaymentReceipt = {
+          saleId: convertingPreOrder.id,
+          orderNumber: convertingPreOrder.booking_number || `#${convertingPreOrder.id.slice(0, 8)}`,
           shopName: shopInfo.name,
           date: new Date().toLocaleString(),
           customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
@@ -658,18 +543,63 @@ export default function POSPage() {
           salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
           items: itemsPayload,
           totalAmount: finalTotal,
-          paidAmount: totalPaidSoFar,
+          paidAmount: totalPaidSoFar, // Reflects cumulative advance paid
           paymentMethod,
           totalBase,
           totalGst,
-          isGstInvoice: isGstBatch,
-          saleStatus: finalStatus
+          isGstInvoice: false, //isGstBatch
+          saleStatus: 'pre_order'
         };
 
-        if (isGstBatch) createdGstOrder = singleOrderResult;
-        else createdEstimateOrder = singleOrderResult;
+        setCompletedGstOrder(null);
+        setCompletedEstimateOrder(partPaymentReceipt);
+        setShowReceiptModal(true);
+      } 
+// --- PATH 2: Converting Pre-Order to Final Sale ---
+      else if (convertingPreOrder && totalPaidSoFar >= finalTotal) {
+        if (billingType === 'b2b') {
+          if (!selectedCustomer) {
+            alert('⚠️ Please select a customer for B2B billing.');
+            setIsCheckingOut(false);
+            return;
+          }
+          if (!selectedCustomer.gstin || !selectedCustomer.address) {
+            alert('⚠️ Selected customer record is missing GSTIN or Address. Both are mandatory for B2B billing.');
+            setIsCheckingOut(false);
+            return;
+          }
+        }
 
-      } else {
+        if (amountPaid === '') {
+          alert('⚠️ Please enter the final balancing amount paid.');
+          setIsCheckingOut(false);
+          return;
+        }
+
+        const newPaymentsPayload = enteredPaid > 0 
+          ? [{ amount: enteredPaid, payment_method: paymentMethod || 'cash' }] 
+          : [];
+
+        const { data: conversionResult, error: rpcError } = await supabase.rpc('convert_sales_order_to_sales', {
+          p_shop_id: shopInfo.id,
+          p_sales_order_id: convertingPreOrder.id,
+          p_new_payments: newPaymentsPayload,
+          p_refund_payment: null,
+          p_fulfillment_status: 'not_set',
+          p_customer_id: selectedCustomer?.id || null,
+          p_salesman_id: selectedSalesman?.id || null,
+          p_total_amount: finalTotal,
+          p_items: itemsPayload, // <--- Passes updated cart items
+          p_amount_paid: enteredPaid,
+          p_payment_method: paymentMethod || 'cash',
+          p_billing_type: billingType,  // <--- Passes B2B/B2C billing type
+          p_customer_name: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+          p_comments: billComments.trim() || null
+        });
+
+        if (rpcError) throw rpcError;
+
+        // Partition cart items into GST and Estimate for correct receipt tab display
         let gstCartItems = [];
         let estimateCartItems = [];
 
@@ -680,132 +610,285 @@ export default function POSPage() {
 
         const gstTotalRaw = gstCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
         const estimateTotalRaw = estimateCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
-        const grandCartTotalRaw = gstTotalRaw + estimateTotalRaw;
 
-        const scaleFactor = grandCartTotalRaw > 0 ? finalTotal / grandCartTotalRaw : 1;
-        const gstTotal = Math.round(gstTotalRaw * scaleFactor);
-        const estimateTotal = finalTotal - gstTotal;
+        let createdGstOrder = null;
+        let createdEstimateOrder = null;
 
-        const totalOverallPaidSoFar = convertingPreOrder ? alreadyPaidAdvance + enteredPaid : finalTotal;
-        const totalOverallAdvance = convertingPreOrder ? alreadyPaidAdvance : 0;
-
-        const gstRatio = grandCartTotalRaw > 0 ? gstTotalRaw / grandCartTotalRaw : 0;
-
-        const gstPaidAllocated = Number((totalOverallPaidSoFar * gstRatio).toFixed(2));
-        const estPaidAllocated = Number((totalOverallPaidSoFar - gstPaidAllocated).toFixed(2));
-
-        const gstAdvanceAllocated = Number((totalOverallAdvance * gstRatio).toFixed(2));
-        const estAdvanceAllocated = Number((totalOverallAdvance - gstAdvanceAllocated).toFixed(2));
-
-        const submitOrderBatch = async (items, batchTotal, allocatedPaid, allocatedAdvance, isGstBatch, existingId) => {
-          if (items.length === 0) return null;
-
-          const { totalBase, totalGst } = calculateTotalGSTBreakdown(items);
-
-          const itemsPayload = items.map(item => {
+        if (gstCartItems.length > 0) {
+          const { totalBase, totalGst } = calculateTotalGSTBreakdown(gstCartItems);
+          const gstItemsPayload = gstCartItems.map(item => {
             const pct = Number(item.gst_percentage || 0);
-            const isTaxed = isGstBatch && item.has_gst && pct > 0;
-            const baseUnitPrice = isTaxed ? Number((item.price / (1 + pct / 100)).toFixed(2)) : item.price;
-            const unitGstAmount = isTaxed ? Number((item.price - baseUnitPrice).toFixed(2)) : 0;
-
+            const baseUnitPrice = Number((item.price / (1 + pct / 100)).toFixed(2));
+            const unitGstAmount = Number((item.price - baseUnitPrice).toFixed(2));
             return {
-              product_id: item.id,
-              sku: item.sku,
-              name: item.name,
-              unit: item.unit,
-              quantity: item.quantity,
-              price: item.price,
-              unit_price: item.price,
-              has_gst: isTaxed,
-              gst_percentage: pct,
+              ...item,
+              has_gst: true,
               base_price: baseUnitPrice,
-              gst_amount: unitGstAmount * item.quantity
+              gst_amount: unitGstAmount * item.quantity,
+              hsn_code: item.hsn_code
             };
           });
 
-          let paymentForThisBatch = batchTotal;
-          if (convertingPreOrder) {
-            paymentForThisBatch = existingId ? (allocatedPaid - allocatedAdvance) : allocatedPaid;
-          }
-
-          const { data: saleId, error: rpcError } = await supabase.rpc('complete_sale', {
-            p_shop_id: shopInfo.id,
-            p_customer_id: selectedCustomer?.id || null,
-            p_total_amount: batchTotal,
-            p_items: itemsPayload,
-            p_amount_paid: paymentForThisBatch,
-            p_payment_method: paymentMethod || 'cash',
-            p_sale_status: 'completed',
-            p_salesman_id: selectedSalesman?.id || null,
-            p_invoice_type: isGstBatch ? 'gst' : 'estimate',
-            p_existing_sale_id: existingId || null
-          });
-
-          if (rpcError) throw rpcError;
-
-          let fetchedOrderNumber = null;
-          if (saleId) {
-            const { data: saleData } = await supabase.from('sales').select('order_number').eq('id', saleId).single();
-            fetchedOrderNumber = saleData?.order_number || null;
-          }
-
-          return {
-            saleId,
-            orderNumber: fetchedOrderNumber,
+          createdGstOrder = {
+            saleId: convertingPreOrder.id,
+            orderNumber: conversionResult?.gst_order_number || null,
             shopName: shopInfo.name,
             date: new Date().toLocaleString(),
             customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
             customerPhone: selectedCustomer ? selectedCustomer.phone : '',
             salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
-            items: itemsPayload,
-            totalAmount: batchTotal,
-            paidAmount: batchTotal,
+            items: gstItemsPayload,
+            totalAmount: gstTotalRaw,
+            paidAmount: gstTotalRaw,
             paymentMethod,
             totalBase,
             totalGst,
-            isGstInvoice: isGstBatch,
+            isGstInvoice: true,
+            saleStatus: 'completed',
+            billingType,
+            customerGstin: selectedCustomer?.gstin || '',
+            customerAddress: selectedCustomer?.address || '',
+            comments: billComments.trim()
+          };
+        }
+
+        if (estimateCartItems.length > 0) {
+          const { totalBase, totalGst } = calculateTotalGSTBreakdown(estimateCartItems);
+          const estItemsPayload = estimateCartItems.map(item => ({
+            ...item,
+            has_gst: false,
+            base_price: item.price,
+            gst_amount: 0
+          }));
+
+          createdEstimateOrder = {
+            saleId: convertingPreOrder.id,
+            orderNumber: conversionResult?.estimate_order_number || null,
+            shopName: shopInfo.name,
+            date: new Date().toLocaleString(),
+            customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+            customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+            salesmanName: selectedSalesman ? selectedSalesman.phone : '',
+            salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
+            items: estItemsPayload,
+            totalAmount: estimateTotalRaw,
+            paidAmount: estimateTotalRaw,
+            paymentMethod,
+            totalBase,
+            totalGst,
+            isGstInvoice: false,
             saleStatus: 'completed'
           };
+        }
+
+        setCompletedGstOrder(createdGstOrder);
+        setCompletedEstimateOrder(createdEstimateOrder);
+        setShowReceiptModal(true);
+
+
+      } 
+// --- PATH 3: Brand New Pre-Order Creation (Calls create_sales_order) ---
+      else if (orderType === 'pre_order') {
+        const paymentsPayload = enteredPaid > 0 
+          ? [{ amount: enteredPaid, payment_method: paymentMethod || 'cash' }] 
+          : [];
+
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('create_sales_order', {
+          p_shop_id: shopInfo.id,
+          p_customer_id: selectedCustomer?.id || null,
+          p_salesman_id: selectedSalesman?.id || null,
+          p_total_amount: finalTotal,
+          p_items: itemsPayload,
+          p_payments: paymentsPayload,
+          p_fulfillment_status: 'not_set',
+          p_amount_paid: enteredPaid,
+          p_invoice_type: isGstBatch ? 'gst' : 'estimate',
+          p_billing_type: billingType,
+          p_customer_name: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+          p_comments: billComments.trim() || null
+        });
+
+        if (rpcError) throw rpcError;
+
+        const newBookingNumber = rpcResult?.booking_number || null;
+        const newOrderId = rpcResult?.order_id || null;
+
+        const { totalBase, totalGst } = calculateTotalGSTBreakdown(cart);
+
+        // Single unified pre-order receipt containing ALL cart items together
+        const preOrderReceipt = {
+          saleId: newOrderId,
+          orderNumber: newBookingNumber,
+          shopName: shopInfo.name,
+          date: new Date().toLocaleString(),
+          customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+          customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+          salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
+          items: itemsPayload, // All items printed together
+          totalAmount: finalTotal,
+          paidAmount: enteredPaid,
+          paymentMethod,
+          totalBase,
+          totalGst,
+          isGstInvoice: false,//isGstBatch
+          saleStatus: 'pre_order',
+          billingType,
+          customerGstin: selectedCustomer?.gstin || '',
+          customerAddress: selectedCustomer?.address || '',
+          comments: billComments.trim()
         };
 
-        if (gstCartItems.length > 0 && gstTotal > 0) {
-          createdGstOrder = await submitOrderBatch(
-            gstCartItems, 
-            gstTotal, 
-            gstPaidAllocated, 
-            gstAdvanceAllocated, 
-            true, 
-            convertingPreOrder ? convertingPreOrder.id : null
-          );
-        }
-
-        if (estimateCartItems.length > 0 && estimateTotal > 0) {
-          const estimateExistingSaleId =
-            convertingPreOrder && gstCartItems.length === 0
-              ? convertingPreOrder.id
-              : null;
-
-          createdEstimateOrder = await submitOrderBatch(
-            estimateCartItems,
-            estimateTotal,
-            estPaidAllocated,
-            estAdvanceAllocated,
-            false,
-            estimateExistingSaleId
-          );
-        }
+        // Pass only to completedGstOrder (or completedEstimateOrder) so it shows a single receipt tab
+        setCompletedGstOrder(null);
+        setCompletedEstimateOrder(preOrderReceipt);
+        setShowReceiptModal(true);
       }
+ // --- PATH 4: Immediate Direct Sale (Calls create_auto_split_sale) ---
+      else {
+        if (amountPaid === '') {
+          alert('⚠️ Please enter the amount paid by the customer.');
+          setIsCheckingOut(false);
+          return;
+        }
 
-      setCompletedGstOrder(createdGstOrder);
-      setCompletedEstimateOrder(createdEstimateOrder);
-      setShowReceiptModal(true);
+        if (Math.abs(enteredPaid - finalTotal) > 0.01) {
+          alert(`⚠️ Amount Mismatch Warning!\n\nAmount Paid (₹${enteredPaid.toFixed(2)}) does not equal Final Payable Amount (₹${finalTotal.toFixed(2)}).`);
+          setIsCheckingOut(false);
+          return;
+        }
+
+        if (billingType === 'b2b') {
+          if (!selectedCustomer) {
+            alert('⚠️ Please select a customer for B2B billing.');
+            setIsCheckingOut(false);
+            return;
+          }
+          if (!selectedCustomer.gstin || !selectedCustomer.address) {
+            alert('⚠️ Selected customer record is missing GSTIN or Address. Both are mandatory for B2B billing.');
+            setIsCheckingOut(false);
+            return;
+          }
+        }
+
+        const paymentsPayload = enteredPaid > 0 
+          ? [{ amount: enteredPaid, payment_method: paymentMethod || 'cash' }] 
+          : [];
+
+        const { data: conversionResult, error: rpcError } = await supabase.rpc('create_auto_split_sale', {
+          p_shop_id: shopInfo.id,
+          p_customer_id: selectedCustomer?.id || null,
+          p_salesman_id: selectedSalesman?.id || null,
+          p_total_amount: finalTotal,
+          p_items: itemsPayload,
+          p_payments: paymentsPayload,
+          p_billing_mode: billingMode,
+          p_fulfillment_status: 'not_set',
+          p_billing_type: billingType,
+          p_customer_name: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+          p_comments: billComments.trim() || null
+        });
+
+        if (rpcError) throw rpcError;
+
+        // Partition cart items into GST and Estimate for receipt modal preview tabs
+        let gstCartItems = [];
+        let estimateCartItems = [];
+
+        cart.forEach(item => {
+          if (billingMode === 'gst_only') gstCartItems.push(item);
+          else if (billingMode === 'estimate_only') estimateCartItems.push(item);
+          else {
+            if (item.has_gst && Number(item.gst_percentage || 0) > 0) gstCartItems.push(item);
+            else estimateCartItems.push(item);
+          }
+        });
+
+        const gstTotalRaw = gstCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+        const estimateTotalRaw = estimateCartItems.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+
+        let createdGstOrder = null;
+        let createdEstimateOrder = null;
+
+        if (gstCartItems.length > 0) {
+          const { totalBase, totalGst } = calculateTotalGSTBreakdown(gstCartItems);
+          const gstItemsPayload = gstCartItems.map(item => {
+            const pct = Number(item.gst_percentage || 0);
+            const baseUnitPrice = Number((item.price / (1 + pct / 100)).toFixed(2));
+            const unitGstAmount = Number((item.price - baseUnitPrice).toFixed(2));
+            return {
+              ...item,
+              has_gst: true,
+              base_price: baseUnitPrice,
+              gst_amount: unitGstAmount * item.quantity,
+              hsn_code: item.hsn_code
+            };
+          });
+
+          createdGstOrder = {
+            orderNumber: conversionResult?.gst_order_number || null,
+            shopName: shopInfo.name,
+            date: new Date().toLocaleString(),
+            customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+            customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+            salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
+            items: gstItemsPayload,
+            totalAmount: gstTotalRaw,
+            paidAmount: gstTotalRaw,
+            paymentMethod,
+            totalBase,
+            totalGst,
+            isGstInvoice: true,
+            saleStatus: 'completed',
+            billingType,
+            customerGstin: selectedCustomer?.gstin || '',
+            customerAddress: selectedCustomer?.address || '',
+            comments: billComments.trim()
+          };
+        }
+
+        if (estimateCartItems.length > 0) {
+          const { totalBase, totalGst } = calculateTotalGSTBreakdown(estimateCartItems);
+          const estItemsPayload = estimateCartItems.map(item => ({
+            ...item,
+            has_gst: false,
+            base_price: item.price,
+            gst_amount: 0
+          }));
+
+          createdEstimateOrder = {
+            orderNumber: conversionResult?.estimate_order_number || null,
+            shopName: shopInfo.name,
+            date: new Date().toLocaleString(),
+            customer: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
+            customerPhone: selectedCustomer ? selectedCustomer.phone : '',
+            salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
+            items: estItemsPayload,
+            totalAmount: estimateTotalRaw,
+            paidAmount: estimateTotalRaw,
+            paymentMethod,
+            totalBase,
+            totalGst,
+            isGstInvoice: false,
+            saleStatus: 'completed',
+            billingType,
+            customerGstin: selectedCustomer?.gstin || '',
+            customerAddress: selectedCustomer?.address || '',
+            comments: billComments.trim()
+          };
+        }
+
+        setCompletedGstOrder(createdGstOrder);
+        setCompletedEstimateOrder(createdEstimateOrder);
+        setShowReceiptModal(true);
+      }
 
       // Reset Form State
       setCart([]);
       setCustomGrandTotal('');
       setAmountPaid('');
+      //setConvertingPreModel(null);
       setConvertingPreOrder(null);
-      setOrderType('sale');
+      setOrderType('');
       setSelectedCustomer(null);
       setCustomerSearch('');
       setSelectedSalesman(null);
@@ -909,7 +992,7 @@ export default function POSPage() {
           <div className="pos-right">
             <div className="card cart-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <h3>{convertingPreOrder ? `Fulfilling Pre-Order (#${convertingPreOrder.id.slice(0, 8)})` : 'Current Order Cart'}</h3>
+                <h3>{convertingPreOrder ? `Fulfilling Pre-Order (#${convertingPreOrder.booking_number || convertingPreOrder.id.slice(0, 8)})` : 'Current Order Cart'}</h3>
                 {convertingPreOrder && (
                   <button className="clear-btn" onClick={handleCancelPreOrderConversion}>✕ Cancel Conversion</button>
                 )}
@@ -1042,10 +1125,11 @@ export default function POSPage() {
                         const isKgs = item.unit?.toLowerCase().includes('kg');
                         return (
                           <tr key={item.id}>
+                            {/* Replace the item badge section inside the cart items table mapping */}
                             <td>
                               <strong>{item.name}</strong><br/>
                               <span className="subtext">{item.sku} ({item.unit || 'Nos'})</span>
-                              <div style={{ marginTop: '2px' }}>
+                              <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 {convertingPreOrder && (
                                   <span className="cart-est-badge" style={{ background: '#e0f2fe', color: '#0369a1', marginRight: '4px' }}>
                                     Pre-booked
@@ -1053,6 +1137,25 @@ export default function POSPage() {
                                 )}
                                 {item.has_gst && Number(item.gst_percentage || 0) > 0 ? (
                                   <span className="cart-gst-badge">GST {item.gst_percentage}%</span>
+                                ) : billingMode === 'gst_only' ? (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <span className="cart-est-badge" style={{ background: '#fef3c7', color: '#92400e' }}>Non-GST</span>
+                                    <select
+                                      value={item.gst_percentage || 0}
+                                      onChange={(e) => {
+                                        const val = Number(e.target.value);
+                                        setCart(cart.map(cartItem => cartItem.id === item.id ? { ...cartItem, has_gst: val > 0, gst_percentage: val } : cartItem));
+                                      }}
+                                      style={{ fontSize: '11px', padding: '2px 4px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                    >
+                                      <option value="0">Add GST %</option>
+                                      <option value="0">GST 0%</option>
+                                      <option value="5">GST 5%</option>
+                                      <option value="12">GST 12%</option>
+                                      <option value="18">GST 18%</option>
+                                      <option value="28">GST 28%</option>
+                                    </select>
+                                  </div>
                                 ) : (
                                   <span className="cart-est-badge">Estimate / Non-GST</span>
                                 )}
@@ -1103,6 +1206,31 @@ export default function POSPage() {
                   <span>Tax Breakdown:</span>
                   <span className="subtext">Base: ₹{totalBase.toFixed(2)} | GST: ₹{totalGst.toFixed(2)}</span>
                 </div>
+                <div className="summary-row">
+                  <span>Billing Type:</span>
+                  <select value={billingType} onChange={(e) => setBillingType(e.target.value)} className="custom-total-input" style={{ width: '140px' }}>
+                    <option value="b2c">Consumer (B2C)</option>
+                    <option value="b2b">Business (B2B)</option>
+                  </select>
+                </div>
+
+                {billingType === 'b2b' && (
+                  <div className="b2b-notice" style={{ fontSize: '11px', color: '#0369a1', background: '#e0f2fe', padding: '6px', borderRadius: '4px' }}>
+                    ℹ️ B2B Selected: Customer GSTIN & Address are mandatory.
+                  </div>
+                )}
+
+                <div className="summary-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                  <span>Bill Comments (Optional):</span>
+                  <input
+                    type="text"
+                    placeholder="Add any reference comments..."
+                    value={billComments}
+                    onChange={(e) => setBillComments(e.target.value)}
+                    className="search-input"
+                    style={{ width: '100%', fontSize: '12px', padding: '6px' }}
+                  />
+                </div>
 
                 {convertingPreOrder ? (
                   <div className="preorder-ledger-card">
@@ -1136,21 +1264,16 @@ export default function POSPage() {
                         ₹{remainingBalanceAfterToday.toFixed(2)}
                       </span>
                     </div>
-                    {remainingBalanceAfterToday > 0 && (
-                      <div className="balance-warning-note">
-                        ℹ️ Balance remaining. Order will stay as Pre-Order.
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <div className="summary-row">
-                    <span>{orderType === 'pre_order' ? 'Advance Payment (₹):' : 'Amount Paid (₹) *:'}</span>
+                    <span>{orderType === 'pre_order' ? 'Advance Deposit (₹):' : 'Amount Paid (₹) *:'}</span>
                     <input
                       type="number"
-                      placeholder={orderType === 'pre_order' ? 'Leave blank for 0' : 'Enter amount paid...'}
+                      placeholder={orderType === 'pre_order' ? '0' : 'Enter amount paid...'}
                       value={amountPaid}
                       onChange={(e) => setAmountPaid(e.target.value)}
-                      className={`custom-total-input ${orderType === 'sale' && amountPaid === '' ? 'highlight-required' : ''}`}
+                      className="custom-total-input"
                     />
                   </div>
                 )}
@@ -1171,7 +1294,7 @@ export default function POSPage() {
                 </div>
 
                 <button className="checkout-btn" disabled={cart.length === 0 || isCheckingOut} onClick={handleCheckout}>
-                  {isCheckingOut ? 'Processing...' : convertingPreOrder ? 'Complete Fulfillment & Settle Balance' : orderType === 'pre_order' ? 'Save Pre-Order & Print Advance Receipt' : 'Complete Sale & Checkout'}
+                  {isCheckingOut ? 'Processing...' : convertingPreOrder ? 'Complete Fulfillment & Settle Balance' : orderType === 'pre_order' ? 'Save Pre-Order Booking' : 'Complete Sale & Checkout'}
                 </button>
               </div>
             </div>
@@ -1187,7 +1310,7 @@ export default function POSPage() {
               <div style={{ marginBottom: '12px' }}>
                 <input
                   type="text"
-                  placeholder="🔍 Search by Order ID, Customer Name or Mobile..."
+                  placeholder="🔍 Search by Booking #, Customer Name or Mobile..."
                   value={preOrderSearch}
                   onChange={(e) => setPreOrderSearch(e.target.value)}
                   style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
@@ -1208,7 +1331,7 @@ export default function POSPage() {
                         <span style={{ fontWeight: 'bold', color: '#0f172a' }}>Total: ₹{po.total_amount}</span>
                       </div>
                       <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                        Order ID: <strong>#{po.id.slice(0, 8)}</strong> | Paid Advance: <strong style={{ color: '#16a34a' }}>₹{po.paid_amount}</strong> | Balance Due: <strong style={{ color: '#b91c1c' }}>₹{(po.total_amount - po.paid_amount).toFixed(2)}</strong>
+                        Booking #: <strong style={{ color: '#0284c7' }}>{po.booking_number || `#${po.id.slice(0, 8)}`}</strong> | Paid Advance: <strong style={{ color: '#16a34a' }}>₹{po.paid_amount}</strong> | Balance Due: <strong style={{ color: '#b91c1c' }}>₹{(po.total_amount - po.paid_amount).toFixed(2)}</strong>
                       </div>
                       <button className="primary-btn" style={{ marginTop: '8px', width: '100%' }} onClick={() => handleLoadPreOrderForConversion(po)}>
                         Load & Fulfill Pre-Order →
@@ -1222,19 +1345,42 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Modal: New Customer */}
+{/* Modal: New Customer */}
         {showNewCustomerModal && (
           <div className="modal-overlay">
             <div className="modal">
               <h3>Add New Customer</h3>
               <form onSubmit={handleCreateCustomer}>
-                <label>Customer Name</label>
-                <input placeholder="Full name" value={newCust.name} onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} required />
+                <label>Customer Type</label>
+                <select 
+                  value={newCust.type} 
+                  onChange={(e) => setNewCust({ ...newCust, type: e.target.value })}
+                  style={{ padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', width: '100%', marginBottom: '10px' }}
+                >
+                  <option value="consumer">Consumer (B2C)</option>
+                  <option value="business">Business (B2B)</option>
+                </select>
+
+                <label>Customer Name *</label>
+                <input placeholder="Full name / Business name" value={newCust.name} onChange={(e) => setNewCust({ ...newCust, name: e.target.value })} required />
+                
                 <label>Mobile Number</label>
                 <input placeholder="Phone number" value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} />
+                
                 <label>Email Address</label>
                 <input type="email" placeholder="Email" value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} />
-                <div className="modal-actions">
+
+                {newCust.type === 'business' && (
+                  <>
+                    <label>GSTIN *</label>
+                    <input placeholder="GSTIN Number (Mandatory for B2B)" value={newCust.gstin} onChange={(e) => setNewCust({ ...newCust, gstin: e.target.value })} required />
+                    
+                    <label>Billing Address *</label>
+                    <input placeholder="Full Address (Mandatory for B2B)" value={newCust.address} onChange={(e) => setNewCust({ ...newCust, address: e.target.value })} required />
+                  </>
+                )}
+
+                <div className="modal-actions" style={{ marginTop: '10px' }}>
                   <button type="submit" className="primary-btn">Save & Select</button>
                   <button type="button" className="cancel-btn" onClick={() => setShowNewCustomerModal(false)}>Cancel</button>
                 </div>
@@ -1297,7 +1443,6 @@ export default function POSPage() {
         .cart-summary { border-top: 1px solid #e2e8f0; padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
         .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #64748b; }
         .custom-total-input { width: 140px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; text-align: right; font-size: 13px; }
-        .custom-total-input.highlight-required { border-color: #ef4444; background: #fef2f2; }
         .total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: 16px; margin-top: 6px; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
         .grand-total { color: #16a34a; font-size: 20px; }
         .checkout-btn { width: 100%; background: #16a34a; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; }
@@ -1313,7 +1458,6 @@ export default function POSPage() {
         .border-top-dashed { border-top: 1px dashed #cbd5e1; padding-top: 6px; }
         .pay-input { border-color: #0284c7; font-weight: bold; }
         .subtext-balance { font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 4px; }
-        .balance-warning-note { font-size: 11px; color: #b91c1c; background: #fef2f2; padding: 4px 8px; border-radius: 4px; margin-top: 2px; border: 1px solid #fecaca; }
 
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
         .modal { background: white; padding: 24px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; width: 400px; }

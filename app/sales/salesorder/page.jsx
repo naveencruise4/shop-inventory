@@ -32,15 +32,15 @@ export default function OrdersPage() {
   // Column Visibility Toggle State
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState({
-    orderNumber: true,
-    orderId: true,
+    bookingNumber: true,
+   // orderId: true,
     date: true,
     customer: true,
     salesRep: true,
     type: true,
     saleStatus: true,
     paymentStatus: true,
-    orderStatus: true,
+    orderStatus: false,
     breakdown: true,
     actions: true
   });
@@ -66,7 +66,7 @@ export default function OrdersPage() {
   };
 
   const [colFilters, setColFilters] = useState({
-    orderNumber: '',
+    bookingNumber: '',
     orderId: '',
     customer: '',
     salesRep: '',
@@ -145,7 +145,7 @@ export default function OrdersPage() {
 
     try {
       let query = supabase
-        .from('sales')
+        .from('sales_order')
         .select(`
           *,
           customers${appliedFilters.customer.trim() ? '!inner' : ''}(name, phone),
@@ -155,8 +155,8 @@ export default function OrdersPage() {
         `, { count: 'exact' })
         .eq('shop_id', shopInfo.id);
 
-      if (appliedFilters.orderNumber) {
-        query = query.ilike('order_number', `%${appliedFilters.orderNumber.trim()}%`);
+      if (appliedFilters.bookingNumber) {
+        query = query.ilike('booking_number', `%${appliedFilters.booking_number.trim()}%`);
       }
 
       if (appliedFilters.orderId) {
@@ -183,7 +183,7 @@ export default function OrdersPage() {
       }
 
       if (appliedFilters.saleStatus) {
-        query = query.eq('sale_status', appliedFilters.saleStatus);
+        query = query.eq('conversion_status', appliedFilters.saleStatus);
       }
 
       if (appliedFilters.paymentStatus) {
@@ -256,7 +256,7 @@ export default function OrdersPage() {
   const handleUpdateSalesman = async (orderId) => {
     const newSalesmanId = selectedRepId === '' ? null : selectedRepId;
     const { error } = await supabase
-      .from('sales')
+      .from('sales_order')
       .update({ salesman_id: newSalesmanId })
       .eq('id', orderId);
 
@@ -295,7 +295,7 @@ export default function OrdersPage() {
   };
 
   const resetToToday = () => {
-    const empty = { orderNumber: '', orderId: '', customer: '', salesRep: '', type: '', saleStatus: '', paymentStatus: '', orderStatus: '' };
+    const empty = { bookingNumber: '', orderId: '', customer: '', salesRep: '', type: '', saleStatus: '', paymentStatus: '', orderStatus: '' };
     setColFilters(empty);
     setDateRange(getInitialDates());
     setAppliedFilters(empty);
@@ -311,7 +311,7 @@ export default function OrdersPage() {
   const handleExportCSV = () => {
     if (orders.length === 0) return alert('No data to export.');
 
-    const headers = ['Order Number', 'Order ID', 'Date', 'Customer', 'Sales Rep', 'Type', 'Sale Status', 'Payment Status', 'Order Status', 'Payment Method', 'Total Amount', 'Paid Amount', 'Pending Amount'];
+    const headers = ['Booking No', 'Order ID', 'Date', 'Customer', 'Sales Rep', 'Type', 'Sale Status', 'Payment Status', 'Order Status', 'Payment Method', 'Total Amount', 'Paid Amount', 'Pending Amount'];
     const escapeCSV = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
 
     const rows = orders.map(o => {
@@ -321,13 +321,13 @@ export default function OrdersPage() {
       const paymentMethod = o.sale_payments?.[0]?.payment_method || o.payment_method || 'cash';
       
       return [
-        escapeCSV(o.order_number || '-'),
+        escapeCSV(o.booking_number || '-'),
         escapeCSV(`#${o.id.slice(0, 8)}`),
         escapeCSV(new Date(o.created_at).toLocaleString()),
         escapeCSV(o.customers?.name || 'Walk-in Customer'),
         escapeCSV(o.salesman?.name || 'Unassigned'),
         escapeCSV(o.invoice_type === 'gst' ? 'GST' : 'Estimate'),
-        escapeCSV(o.sale_status || 'completed'),
+        escapeCSV(o.conversion_status || 'completed'),
         escapeCSV(o.payment_status || 'paid'),
         escapeCSV(o.order_status || 'delivered'),
         escapeCSV(paymentMethod),
@@ -349,7 +349,7 @@ export default function OrdersPage() {
     URL.revokeObjectURL(url);
   };
 
-  const handleReprint = (order) => {
+ const handleReprint = (order) => {
     const isGst = order.invoice_type === 'gst';
     let totalBase = 0; let totalGst = 0;
 
@@ -369,7 +369,8 @@ export default function OrdersPage() {
 
     const formattedOrder = {
       saleId: order.id,
-      orderNumber: order.order_number,
+      bookingNumber: order.booking_number, // <--- Added bookingNumber here
+      orderNumber: order.booking_number || `#${order.id.slice(0, 8)}`, // <--- Ensure orderNumber is populated
       shopName: shopInfo?.name || 'My Shop',
       date: new Date(order.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       customer: order.customers?.name || 'Walk-in Customer',
@@ -379,7 +380,10 @@ export default function OrdersPage() {
       totalAmount: Number(order.total_amount),
       paidAmount: Number(order.paid_amount || 0),
       paymentMethod,
-      totalBase, totalGst, isGstInvoice: isGst, saleStatus: order.sale_status
+      totalBase, 
+      totalGst, 
+      isGstInvoice: isGst, 
+      saleStatus: order.conversion_status === 'open' ? 'pre_order' : order.conversion_status
     };
 
     if (isGst) setSelectedOrderForPrint({ gst: formattedOrder, estimate: null });
@@ -517,13 +521,13 @@ export default function OrdersPage() {
                 <table className="orders-table">
                   <thead>
                     <tr className="header-titles-row">
-                      {visibleColumns.orderNumber && (
+                      {visibleColumns.bookingNumber && (
                         <th>
                           <div className="th-content">
-                            Order Number
-                            <button className={`filter-icon-btn ${appliedFilters.orderNumber ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'orderNumber' ? null : 'orderNumber')}>▼</button>
+                            Booking No
+                            <button className={`filter-icon-btn ${appliedFilters.bookingNumber ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'bookingNumber' ? null : 'bookingNumber')}>▼</button>
                           </div>
-                          {renderFilterMenu('orderNumber', 'Search Order # & Enter...', 'text')}
+                          {renderFilterMenu('bookingNumber', 'Search Order # & Enter...', 'text')}
                         </th>
                       )}
                       {visibleColumns.orderId && (
@@ -578,8 +582,8 @@ export default function OrdersPage() {
                             <button className={`filter-icon-btn ${appliedFilters.saleStatus ? 'active' : ''}`} onClick={() => setActiveFilterCol(activeFilterCol === 'saleStatus' ? null : 'saleStatus')}>▼</button>
                           </div>
                           {renderFilterMenu('saleStatus', '', 'select', [
-                            {label: 'Completed', value: 'completed'},
-                            {label: 'Pre Order', value: 'pre_order'}
+                            {label: 'Converted', value: 'converted'},
+                            {label: 'Open', value: 'open'}
                           ])}
                         </th>
                       )}
@@ -627,14 +631,14 @@ export default function OrdersPage() {
                         const paid = Number(order.paid_amount || 0);
                         const pending = Math.max(0, total - paid);
                         const repName = order.salesman?.name || 'Unassigned';
-                        const sStatus = order.sale_status || 'completed';
+                        const sStatus = order.conversion_status || 'completed';
                         const pStatus = order.payment_status || (paid >= total ? 'paid' : paid > 0 ? 'partial' : 'pending');
                         const oStatus = order.order_status || (sStatus === 'pre_order' ? 'processing' : 'delivered');
                         const isEditingRep = editingSalesmanOrderId === order.id;
 
                         return (
                           <tr key={order.id}>
-                            {visibleColumns.orderNumber && <td><strong>{order.order_number || '-'}</strong></td>}
+                            {visibleColumns.bookingNumber && <td><strong>{order.booking_number || '-'}</strong></td>}
                             {visibleColumns.orderId && <td><span className="subtext">#{order.id.slice(0, 8)}</span></td>}
                             {visibleColumns.date && (
                               <td className="date-cell">
@@ -805,6 +809,8 @@ export default function OrdersPage() {
         .status-badge.payment-pending { background: #fee2e2; color: #b91c1c; }
         .status-badge.sale-completed { background: #f1f5f9; color: #334155; }
         .status-badge.sale-pre_order { background: #fef3c7; color: #92400e; }
+        .status-badge.sale-open { background: #fef3c7; color: #92400e; }
+        .status-badge.sale-converted { background: #dcfce7; color: #15803d; }
         .status-badge.order-delivered { background: #e0f2fe; color: #0369a1; }
         .status-badge.order-confirmed { background: #f3e8ff; color: #6b21a8; }
         .status-badge.order-processing { background: #ffedd5; color: #c2410c; }

@@ -46,6 +46,7 @@ export default function PrintableReceiptModal({
   if (!show || (!completedGstOrder && !completedEstimateOrder)) return null;
 
   const currentActiveOrder = activeReceiptTab === 'gst' ? (completedGstOrder || completedEstimateOrder) : (completedEstimateOrder || completedGstOrder);
+  const isPreOrder = currentActiveOrder?.saleStatus === 'pre_order';
   const isGstBill = currentActiveOrder?.isGstInvoice && shopProfile?.has_gst;
 
   const handlePrint = () => {
@@ -135,7 +136,7 @@ export default function PrintableReceiptModal({
               </div>
               <div className="header-right">
                 <p className="receipt-subtitle">
-                  {currentActiveOrder.saleStatus === 'pre_order' ? 'PRE-ORDER RECEIPT' : currentActiveOrder.isGstInvoice ? 'Invoice' : 'Estimate'}
+                  {isPreOrder ? 'PRE-ORDER RECEIPT' : currentActiveOrder.isGstInvoice ? 'Invoice' : 'Estimate'}
                 </p>
                 {shopProfile?.phone && <p className="shop-detail">Phone: {shopProfile.phone}</p>}
                 {isGstBill && shopProfile?.gstin && (
@@ -148,18 +149,24 @@ export default function PrintableReceiptModal({
               <div className="receipt-meta">
                 <div><strong>Date:</strong> {currentActiveOrder.date}</div>
                 {currentActiveOrder.orderNumber && (
-                  <div><strong>Order No:</strong> {currentActiveOrder.orderNumber}</div>
+                  <div><strong>{currentActiveOrder.saleStatus === 'pre_order' ? 'Booking No:' : 'Order No:'}</strong> {currentActiveOrder.orderNumber}</div>
                 )}
                 
               </div>
               <div className="receipt-meta">
                 <div><strong>Customer:</strong> {currentActiveOrder.customer} {currentActiveOrder.customerPhone ? `(${currentActiveOrder.customerPhone})` : ''}</div>
-                <div><strong>Order ID:</strong> #{currentActiveOrder.saleId?.slice(0, 8)}</div>
-                
+                {/* <div><strong>Order ID:</strong> #{currentActiveOrder.saleId?.slice(0, 8)}</div> */}
+               <div><strong>Payment:</strong> {currentActiveOrder.paymentMethod?.toUpperCase()}</div>               
               </div>
+              {currentActiveOrder.billingType === 'b2b' && (
+                <div style={{ fontSize: '11px', color: '#334155', marginTop: '4px', borderTop: '1px dotted #cbd5e1', paddingTop: '4px' }}>
+                  {currentActiveOrder.customerGstin && <div><strong>GSTIN:</strong> {currentActiveOrder.customerGstin}</div>}
+                  {currentActiveOrder.customerAddress && <div><strong>Address:</strong> {currentActiveOrder.customerAddress}</div>}
+                </div>
+              )}
               <div className="receipt-meta">
                 <div><strong>Sales Rep:</strong> {currentActiveOrder.salesmanName || 'Unassigned'}</div>
-                <div><strong>Payment:</strong> {currentActiveOrder.paymentMethod?.toUpperCase()}</div>
+  
               </div>
             </div>
 
@@ -192,13 +199,13 @@ export default function PrintableReceiptModal({
             </table>
 
             <div className="receipt-summary-block">
-              {currentActiveOrder.totalGst > 0 && (
+              {currentActiveOrder.isGstInvoice && currentActiveOrder.totalGst > 0 && (
                 <div className="receipt-row">
                   <span>Taxable Amount (Base):</span>
                   <span>₹{currentActiveOrder.totalBase?.toFixed(2)}</span>
                 </div>
               )}
-              {currentActiveOrder.totalGst > 0 && (
+              {currentActiveOrder.isGstInvoice && currentActiveOrder.totalGst > 0 && (
                 <div className="receipt-row">
                   <span>Total GST Extracted:</span>
                   <span>₹{currentActiveOrder.totalGst?.toFixed(2)}</span>
@@ -219,7 +226,11 @@ export default function PrintableReceiptModal({
                 </div>
               )}
             </div>
-
+            {currentActiveOrder.comments && (
+              <div className="receipt-comments-block" style={{ fontSize: '11px', color: '#475569', marginTop: '8px', borderTop: '1px dashed #cbd5e1', paddingTop: '4px' }}>
+                <strong>Comments:</strong> {currentActiveOrder.comments}
+              </div>
+            )}
             <div className="receipt-footer">
               <p>Thank you for shopping with us!</p>
             </div>
