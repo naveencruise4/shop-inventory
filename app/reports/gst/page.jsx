@@ -125,6 +125,7 @@ export default function GSTReportsPage() {
                     <th>Date</th>
                     <th>Customer</th>
                     <th>GSTIN</th>
+                    <th>SKU</th>
                     <th>Product Name</th>
                     <th>HSN</th>
                     <th>Qty</th>
@@ -144,13 +145,14 @@ export default function GSTReportsPage() {
                         <td>{item.invoice_date}</td>
                         <td>{item.customer_name || 'Walk-in'}</td>
                         <td>{item.customer_gstin || '—'}</td>
+                        <td>{item.sku}</td>
                         <td>{item.product_name}</td>
                         <td>{item.hsn_code || '—'}</td>
                         <td>{item.quantity}</td>
-                        <td>₹{Number(item.taxable_value).toFixed(2)}</td>
-                        <td>{item.gst_percentage}%</td>
-                        <td style={{ color: '#0369a1' }}>₹{Number(item.gst_amount).toFixed(2)}</td>
-                        <td style={{ fontWeight: 'bold' }}>₹{Number(item.gross_amount).toFixed(2)}</td>
+                        <td>{Number(item.taxable_value).toFixed(2)}</td>
+                        <td>{item.gst_percentage}</td>
+                        <td style={{ color: '#0369a1' }}>{Number(item.gst_amount).toFixed(2)}</td>
+                        <td style={{ fontWeight: 'bold' }}>{Number(item.gross_amount).toFixed(2)}</td>
                       </tr>
                     ))
                   )}

@@ -502,17 +502,17 @@ export default function OrdersPage() {
               <span className="summary-value">{totalCount}</span>
             </div>
             <div className="summary-card">
-              <span className="summary-label">Gross Amount</span>
+              <span className="summary-label">Total Sales</span>
               <span className="summary-value">₹{summary.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
             </div>
-            <div className="summary-card success">
+            {/* <div className="summary-card success">
               <span className="summary-label">Total Collected</span>
               <span className="summary-value">₹{summary.totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
             </div>
             <div className="summary-card danger">
               <span className="summary-label">Total Pending Dues</span>
               <span className="summary-value">₹{summary.totalPending.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-            </div>
+            </div> */}
           </div>
         </div>
 

@@ -178,7 +178,7 @@ export default function Sidebar() {
                 }}
                 title={isCollapsed ? 'Purchases' : ''}
               >
-                <span className="nav-icon">🛒</span>
+                <span className="nav-icon">📋</span>
                 {!isCollapsed && (
                   <>
                     <span className="nav-label" style={{ flex: 1 }}>Reports</span>
@@ -213,6 +213,10 @@ export default function Sidebar() {
               <span className="nav-icon">📖</span>
               {!isCollapsed && <span className="nav-label">Ledger</span>}
             </Link> */}
+
+            <div className="nav-item">
+              <Link href="/expenses">💸 Expenses</Link>
+            </div>
 
             <Link
               href="/settings"

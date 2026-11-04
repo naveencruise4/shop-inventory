@@ -207,7 +207,7 @@ export default function PurchaseBillsPage() {
         sku: prod.sku,
         name: prod.name,
         quantity: 1,
-        purchase_price: prod.cost_price || prod.selling_price || 0,
+        purchase_price: prod.cost_price || 0,// prod.selling_price || 0,
         has_gst: prod.has_gst || false,
         gst_percentage: Number(prod.gst_percentage || 18)
       }]);

@@ -394,6 +394,8 @@ export default function OrdersPage() {
 
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
 
+  // ---> ADD THIS LINE HERE:
+  //const openOrdersCount = orders.filter(o => o.conversion_status === 'open').length;
   const renderFilterMenu = (colKey, placeholder, type = 'text', options = []) => {
     if (activeFilterCol !== colKey) return null;
     
@@ -488,7 +490,7 @@ export default function OrdersPage() {
               {hasActiveFilters && (
                 <button className="secondary-btn" onClick={resetToToday}>↺ Reset Filters</button>
               )}
-              <button className="export-btn" onClick={handleExportCSV}>📊 Export Page</button>
+              {/* <button className="export-btn" onClick={handleExportCSV}>📊 Export Page</button> */}
             </div>
           </div>
 
@@ -497,18 +499,22 @@ export default function OrdersPage() {
               <span className="summary-label">Total Orders</span>
               <span className="summary-value">{totalCount}</span>
             </div>
-            <div className="summary-card">
+            {/* <div className="summary-card">
+              <span className="summary-label">Open Orders</span>
+              <span className="summary-value">{openOrdersCount}</span>
+            </div> */}
+            {/* <div className="summary-card">
               <span className="summary-label">Gross Amount</span>
               <span className="summary-value">₹{summary.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="summary-card success">
+            </div> */}
+            {/* <div className="summary-card success">
               <span className="summary-label">Total Collected</span>
               <span className="summary-value">₹{summary.totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
             </div>
             <div className="summary-card danger">
               <span className="summary-label">Total Pending Dues</span>
               <span className="summary-value">₹{summary.totalPending.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-            </div>
+            </div> */}
           </div>
         </div>
 
