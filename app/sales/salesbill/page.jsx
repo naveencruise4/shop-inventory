@@ -492,7 +492,7 @@ export default function OrdersPage() {
               {hasActiveFilters && (
                 <button className="secondary-btn" onClick={resetToToday}>↺ Reset Filters</button>
               )}
-              <button className="export-btn" onClick={handleExportCSV}>📊 Export Page</button>
+              {/* <button className="export-btn" onClick={handleExportCSV}>📊 Export Page</button> */}
             </div>
           </div>
 

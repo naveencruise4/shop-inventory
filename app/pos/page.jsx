@@ -483,22 +483,23 @@ const handleCheckout = async () => {
 
       const isGstBatch = targetInvoiceType === 'gst';
 
+      // For Pre-Orders (Path 1 & Path 3), preserve the item's native tax settings
       const itemsPayload = cart.map(item => {
         const pct = Number(item.gst_percentage || 0);
-        const isTaxed = isGstBatch && item.has_gst && pct > 0;
-        const baseUnitPrice = isTaxed ? Number((item.price / (1 + pct / 100)).toFixed(2)) : item.price;
-        const unitGstAmount = isTaxed ? Number((item.price - baseUnitPrice).toFixed(2)) : 0;
+        const hasTax = Boolean(item.has_gst) && pct > 0;
+        const baseUnitPrice = hasTax ? Number((item.price / (1 + pct / 100)).toFixed(2)) : item.price;
+        const unitGstAmount = hasTax ? Number((item.price - baseUnitPrice).toFixed(2)) : 0;
 
         return {
           product_id: item.id,
-          sku: item.sku,
-          name: item.name,
-          unit: item.unit,
-          hsn_code: item.hsn_code,
-          quantity: item.quantity,
-          price: item.price,
-          unit_price: item.price,
-          has_gst: isTaxed,
+          sku: item.sku || '',
+          name: item.name || '',
+          unit: item.unit || 'Nos',
+          hsn_code: item.hsn_code || null,
+          quantity: Number(item.quantity),
+          price: Number(item.price),
+          unit_price: Number(item.price),
+          has_gst: hasTax,
           gst_percentage: pct,
           base_price: baseUnitPrice,
           gst_amount: unitGstAmount * item.quantity
@@ -507,29 +508,19 @@ const handleCheckout = async () => {
 
       const totalPaidSoFar = convertingPreOrder ? alreadyPaidAdvance + enteredPaid : enteredPaid;
 
-// --- PATH 1: Additional Part-Payment on Existing Pre-Order (Remains Open Pre-Order) ---
+// --- PATH 1: Additional Part-Payment / Item Updates on Existing Pre-Order ---
       if (convertingPreOrder && totalPaidSoFar < finalTotal) {
-        const { error: updateError } = await supabase
-          .from('sales_order')
-          .update({ paid_amount: totalPaidSoFar })
-          .eq('id', convertingPreOrder.id);
+        const { error: rpcError } = await supabase.rpc('update_sales_order_items', {
+          p_shop_id: shopInfo.id,
+          p_sales_order_id: convertingPreOrder.id,
+          p_total_amount: finalTotal,
+          p_paid_amount: totalPaidSoFar,
+          p_payment_amount: enteredPaid,
+          p_payment_method: paymentMethod || 'cash',
+          p_items: itemsPayload // Includes product IDs, quantities, prices, and HSN codes
+        });
 
-        if (updateError) throw updateError;
-
-        if (enteredPaid > 0) {
-          const { error: paymentError } = await supabase
-            .from('sale_payments')
-            .insert({
-              shop_id: shopInfo.id,
-              sales_order_id: convertingPreOrder.id,
-              sale_id: null,
-              amount: enteredPaid,
-              payment_method: paymentMethod || 'cash',
-              transaction_type: 'receipt'
-            });
-
-          if (paymentError) throw paymentError;
-        }
+        if (rpcError) throw rpcError;
 
         // Construct receipt preview for part-payment update
         const { totalBase, totalGst } = calculateTotalGSTBreakdown(cart);
@@ -543,18 +534,18 @@ const handleCheckout = async () => {
           salesmanName: selectedSalesman ? selectedSalesman.name : 'Unassigned',
           items: itemsPayload,
           totalAmount: finalTotal,
-          paidAmount: totalPaidSoFar, // Reflects cumulative advance paid
+          paidAmount: totalPaidSoFar,
           paymentMethod,
           totalBase,
           totalGst,
-          isGstInvoice: false, //isGstBatch
+          isGstInvoice: false,
           saleStatus: 'pre_order'
         };
 
         setCompletedGstOrder(null);
         setCompletedEstimateOrder(partPaymentReceipt);
         setShowReceiptModal(true);
-      } 
+      }
 // --- PATH 2: Converting Pre-Order to Final Sale ---
       else if (convertingPreOrder && totalPaidSoFar >= finalTotal) {
         if (billingType === 'b2b') {
