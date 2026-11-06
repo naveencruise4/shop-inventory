@@ -182,22 +182,44 @@ export default function ProductsPage() {
       if (data) setPurchasesHistory(data);
     };
 
-    const fetchSalesHistory = async (sku) => {
-        const { data } = await supabase
-          .from('sale_items')
-          .select('*, sales(created_at, sale_status, customer_id, customers(name))')
-          .eq('sku', sku);
-          
-        // Sort sales in memory or via query by sales.created_at descending so newest are on top
-        if (data) {
-          const sortedSales = data.sort((a, b) => {
-            const dateA = new Date(a.sales?.created_at || 0);
-            const dateB = new Date(b.sales?.created_at || 0);
-            return dateB - dateA; // Descending order (latest first)
-          });
-          setSalesHistory(sortedSales);
-        }
-      };
+  const fetchSalesHistory = async (sku) => {
+    const { data, error } = await supabase
+      .from('sale_items')
+      .select(`
+        *,
+        sales(created_at, sale_status, customer_id, customers(name)),
+        sales_order(created_at, conversion_status, customer_id, customers(name), booking_number)
+      `)
+      .eq('sku', sku);
+
+    if (error) {
+      console.error('Error fetching sales history:', error);
+      return;
+    }
+
+    if (data) {
+      // 1. Filter out cancelled or rejected sales and sales orders
+      const validItems = data.filter(item => {
+        const saleStatus = item.sales?.sale_status;
+        const orderStatus = item.sales_order?.conversion_status;
+
+        // Exclude if marked as cancelled or rejected in either table
+        if (saleStatus === 'cancelled' || saleStatus === 'rejected') return false;
+        if (orderStatus === 'cancelled' || orderStatus === 'rejected') return false;
+
+        return true;
+      });
+
+      // 2. Sort descending by date (handling both completed sales and booked pre-orders)
+      const sortedSales = validItems.sort((a, b) => {
+        const dateA = new Date(a.sales?.created_at || a.sales_order?.created_at || 0);
+        const dateB = new Date(b.sales?.created_at || b.sales_order?.created_at || 0);
+        return dateB - dateA; // Latest first
+      });
+
+      setSalesHistory(sortedSales);
+    }
+  };
 
   const totalPages = useMemo(() => {
     return Math.ceil(totalCount / pageSize) || 1;
@@ -595,14 +617,19 @@ export default function ProductsPage() {
                       <tr><th>Order Date</th><th>Customer</th><th>Qty Sold</th><th>Sale Price</th></tr>
                     </thead>
                     <tbody>
-                      {salesHistory.map(s => (
-                        <tr key={s.id}>
-                          <td>{new Date(s.sales?.created_at).toLocaleDateString()}</td>
-                          <td>{s.sales?.customers?.name || 'Walk-in'}</td>
-                          <td>{s.quantity}</td>
-                          <td>₹{s.unit_price}</td>
-                        </tr>
-                      ))}
+                      {salesHistory.map(s => {
+                        const recordDate = s.sales?.created_at || s.sales_order?.created_at || s.created_at;
+                        const customerName = s.sales?.customers?.name || s.sales_order?.customers?.name || 'Walk-in';
+
+                        return (
+                          <tr key={s.id}>
+                            <td>{recordDate ? new Date(recordDate).toLocaleDateString() : '-'}</td>
+                            <td>{customerName}</td>
+                            <td>{s.quantity}</td>
+                            <td>₹{s.unit_price}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

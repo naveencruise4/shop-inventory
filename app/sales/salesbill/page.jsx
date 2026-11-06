@@ -18,6 +18,11 @@ export default function OrdersPage() {
   const [editingSalesmanOrderId, setEditingSalesmanOrderId] = useState(null);
   const [selectedRepId, setSelectedRepId] = useState('');
 
+// Action Modal State for Void / Rejecting Bills
+  const [actionModal, setActionModal] = useState({ show: false, target: null });
+  const [actionReason, setActionReason] = useState('');
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+
   // Summary Totals State
   const [summary, setSummary] = useState({
     totalAmount: 0,
@@ -259,6 +264,31 @@ export default function OrdersPage() {
     fetchSummary();
   }, [fetchOrders, fetchSummary]);
 
+  const handleExecuteReject = async () => {
+    if (!actionModal.target || !shopInfo?.id) return;
+    setIsSubmittingAction(true);
+
+    try {
+      const { error } = await supabase.rpc('reject_sale_or_order', {
+        p_shop_id: shopInfo.id,
+        p_target_id: actionModal.target.id,
+        p_target_type: 'sale',
+        p_reason: actionReason.trim() || 'Internal billing error / void'
+      });
+      if (error) throw error;
+
+      alert('Bill successfully rejected and stock returned to inventory.');
+      setActionModal({ show: false, target: null });
+      setActionReason('');
+      fetchOrders();
+      fetchSummary();
+    } catch (err) {
+      alert(`Action failed: ${err.message}`);
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
   const handleUpdateSalesman = async (orderId) => {
     const newSalesmanId = selectedRepId === '' ? null : selectedRepId;
     const { error } = await supabase
@@ -461,8 +491,8 @@ export default function OrdersPage() {
         <div className="sticky-top-container">
           <div className="top-bar">
             <div>
-              <h1>Sales Orders Search & Manage</h1>
-              <p className="subtext" style={{ marginTop: '2px' }}>Manage and filter orders, salesmen, payment methods, and tracking statuses</p>
+              <h1>Sales Bills Search & Manage</h1>
+              <p className="subtext" style={{ marginTop: '2px' }}>Manage and filter sales, salesmen, payment methods, and tracking statuses</p>
             </div>
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', position: 'relative' }}>
               
@@ -596,7 +626,8 @@ export default function OrdersPage() {
                           </div>
                           {renderFilterMenu('saleStatus', '', 'select', [
                             {label: 'Completed', value: 'completed'},
-                            {label: 'Pre Order', value: 'pre_order'}
+                            //{label: 'Pre Order', value: 'pre_order'},
+                            {label: 'Rejected', value: 'rejected'}
                           ])}
                         </th>
                       )}
@@ -732,7 +763,18 @@ export default function OrdersPage() {
 
                             {visibleColumns.actions && (
                               <td>
-                                <button className="reprint-btn" onClick={() => handleReprint(order)}>🖨️ Reprint</button>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                  <button className="reprint-btn" onClick={() => handleReprint(order)}>🖨️ Reprint</button>
+                                  {order.sale_status === 'completed' && (
+                                    <button 
+                                      style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '6px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                      onClick={() => setActionModal({ show: true, target: order })}
+                                      title="Void / Reject Bill"
+                                    >
+                                      Reject
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             )}
                           </tr>
@@ -762,6 +804,42 @@ export default function OrdersPage() {
             </>
           )}
         </div>
+
+        {actionModal.show && (
+            <div className="modal-overlay">
+              <div className="modal" style={{ width: '420px' }}>
+                <h3>⚠️ Confirm Bill Void / Rejection</h3>
+                <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 12px 0' }}>
+                  This will mark the bill as voided, return items back to available physical stock, and neutralize its impact on financial reports.
+                </p>
+
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}>Reason / Notes *</label>
+                <textarea 
+                  placeholder="Enter reason (e.g., Wrong items scanned, Duplicate bill, Incorrect price)..." 
+                  value={actionReason} 
+                  onChange={(e) => setActionReason(e.target.value)} 
+                  style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px', minHeight: '70px', boxSizing: 'border-box', marginBottom: '16px' }}
+                />
+
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button 
+                    className="secondary-btn" 
+                    onClick={() => { setActionModal({ show: false, target: null }); setActionReason(''); }}
+                  >
+                    Close
+                  </button>
+                  <button 
+                    className="primary-btn" 
+                    disabled={isSubmittingAction || !actionReason.trim()}
+                    style={{ background: '#dc2626', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                    onClick={handleExecuteReject}
+                  >
+                    {isSubmittingAction ? 'Processing...' : 'Confirm Action'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
         <PrintableReceiptModal
           show={showReceiptModal}
@@ -831,7 +909,7 @@ export default function OrdersPage() {
         .status-badge.payment-partial { background: #fef9c3; color: #a16207; }
         .status-badge.payment-pending { background: #fee2e2; color: #b91c1c; }
         .status-badge.sale-completed { background: #f1f5f9; color: #334155; }
-        .status-badge.sale-pre_order { background: #fef3c7; color: #92400e; }
+        // .status-badge.sale-rejected { background: #fef3c7; color: #b91c1c;}
         .status-badge.order-delivered { background: #e0f2fe; color: #0369a1; }
         .status-badge.order-confirmed { background: #f3e8ff; color: #6b21a8; }
         .status-badge.order-processing { background: #ffedd5; color: #c2410c; }
@@ -841,7 +919,9 @@ export default function OrdersPage() {
         .pending-line { color: #b91c1c; margin-top: 2px; }
         .reprint-btn { background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all 0.15s ease; }
         .reprint-btn:hover { background: #e2e8f0; border-color: #94a3b8; }
-
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
+        .modal { background: white; padding: 24px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; width: 400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+        .status-badge.sale-rejected { background: #fee2e2; color: #b91c1c; text-decoration: line-through; }
         .pagination-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-top: 1px solid #e2e8f0; background: #fff; font-size: 13px; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
         .pagination-info { display: flex; align-items: center; gap: 10px; color: #475569; }
         .page-size-select { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }

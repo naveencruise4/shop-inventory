@@ -516,8 +516,9 @@ const handleCheckout = async () => {
           p_total_amount: finalTotal,
           p_paid_amount: totalPaidSoFar,
           p_payment_amount: enteredPaid,
-          p_payment_method: paymentMethod || 'cash',
-          p_items: itemsPayload // Includes product IDs, quantities, prices, and HSN codes
+          p_payment_method: paymentMethod,
+          p_items: itemsPayload//, // Includes product IDs, quantities, prices, and HSN codes
+       //   p_comments: billComments.trim() || null
         });
 
         if (rpcError) throw rpcError;
@@ -539,7 +540,8 @@ const handleCheckout = async () => {
           totalBase,
           totalGst,
           isGstInvoice: false,
-          saleStatus: 'pre_order'
+          saleStatus: 'pre_order',
+          comments: billComments.trim()
         };
 
         setCompletedGstOrder(null);
@@ -568,7 +570,7 @@ const handleCheckout = async () => {
         }
 
         const newPaymentsPayload = enteredPaid > 0 
-          ? [{ amount: enteredPaid, payment_method: paymentMethod || 'cash' }] 
+          ? [{ amount: enteredPaid, payment_method: paymentMethod }] 
           : [];
 
         const { data: conversionResult, error: rpcError } = await supabase.rpc('convert_sales_order_to_sales', {
@@ -582,7 +584,7 @@ const handleCheckout = async () => {
           p_total_amount: finalTotal,
           p_items: itemsPayload, // <--- Passes updated cart items
           p_amount_paid: enteredPaid,
-          p_payment_method: paymentMethod || 'cash',
+          p_payment_method: paymentMethod,
           p_billing_type: billingType,  // <--- Passes B2B/B2C billing type
           p_customer_name: selectedCustomer ? selectedCustomer.name : 'Walk-in Customer',
           p_comments: billComments.trim() || null
@@ -681,7 +683,7 @@ const handleCheckout = async () => {
 // --- PATH 3: Brand New Pre-Order Creation (Calls create_sales_order) ---
       else if (orderType === 'pre_order') {
         const paymentsPayload = enteredPaid > 0 
-          ? [{ amount: enteredPaid, payment_method: paymentMethod || 'cash' }] 
+          ? [{ amount: enteredPaid, payment_method: paymentMethod }] 
           : [];
 
         const { data: rpcResult, error: rpcError } = await supabase.rpc('create_sales_order', {
@@ -762,7 +764,7 @@ const handleCheckout = async () => {
         }
 
         const paymentsPayload = enteredPaid > 0 
-          ? [{ amount: enteredPaid, payment_method: paymentMethod || 'cash' }] 
+          ? [{ amount: enteredPaid, payment_method: paymentMethod }] 
           : [];
 
         const { data: conversionResult, error: rpcError } = await supabase.rpc('create_auto_split_sale', {

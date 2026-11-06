@@ -15,6 +15,7 @@ export default function PurchaseBillsPage() {
   const todayStr = new Date().toISOString().split('T')[0];
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const cartEndRef = useRef(null);
 
   // Filters including Date Range (startDate & endDate)
   const [colFilters, setColFilters] = useState({ 
@@ -215,6 +216,10 @@ export default function PurchaseBillsPage() {
     setProductSearch('');
     setShowProductDropdown(false);
   };
+
+  useEffect(() => {
+    cartEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [cart]);
 
   const calculateSubtotal = () => cart.reduce((sum, item) => sum + (Number(item.purchase_price) * Number(item.quantity)), 0);
 
@@ -699,34 +704,38 @@ export default function PurchaseBillsPage() {
               </div>
 
               {cart.length > 0 && (
-                <table className="cart-table" style={{ marginBottom: '16px' }}>
-                  <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th>Qty</th>
-                      <th>Unit Cost (₹)</th>
-                      <th>Total</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cart.map(item => (
-                      <tr key={item.id}>
-                        <td><strong>{item.name}</strong><br/><span className="subtext">{item.sku}</span></td>
-                        <td><input type="number" value={item.quantity} onChange={(e) => {
-                          const q = Number(e.target.value);
-                          setCart(cart.map(c => c.id === item.id ? { ...c, quantity: q } : c));
-                        }} style={{ width: '60px', padding: '4px' }} /></td>
-                        <td><input type="number" value={item.purchase_price} onChange={(e) => {
-                          const p = Number(e.target.value);
-                          setCart(cart.map(c => c.id === item.id ? { ...c, purchase_price: p } : c));
-                        }} style={{ width: '80px', padding: '4px' }} /></td>
-                        <td>₹{(item.purchase_price * item.quantity).toFixed(2)}</td>
-                        <td><button onClick={() => setCart(cart.filter(c => c.id !== item.id))} style={{ color: 'red', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button></td>
+                <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '16px' }}>
+                  <table className="cart-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', margin: 0 }}>
+                    <thead style={{ position: 'sticky', top: 0, background: '#f1f5f9', zIndex: 2 }}>
+                      <tr>
+                        <th style={{ padding: '8px' }}>Product</th>
+                        <th style={{ padding: '8px' }}>Qty</th>
+                        <th style={{ padding: '8px' }}>Unit Cost (₹)</th>
+                        <th style={{ padding: '8px' }}>Total</th>
+                        <th style={{ padding: '8px' }}></th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {cart.map(item => (
+                        <tr key={item.id}>
+                          <td style={{ padding: '8px' }}><strong>{item.name}</strong><br/><span className="subtext">{item.sku}</span></td>
+                          <td style={{ padding: '8px' }}><input type="number" value={item.quantity} onChange={(e) => {
+                            const q = Number(e.target.value);
+                            setCart(cart.map(c => c.id === item.id ? { ...c, quantity: q } : c));
+                          }} style={{ width: '60px', padding: '4px' }} /></td>
+                          <td style={{ padding: '8px' }}><input type="number" value={item.purchase_price} onChange={(e) => {
+                            const p = Number(e.target.value);
+                            setCart(cart.map(c => c.id === item.id ? { ...c, purchase_price: p } : c));
+                          }} style={{ width: '80px', padding: '4px' }} /></td>
+                          <td style={{ padding: '8px' }}>₹{(item.purchase_price * item.quantity).toFixed(2)}</td>
+                          <td style={{ padding: '8px' }}><button onClick={() => setCart(cart.filter(c => c.id !== item.id))} style={{ color: 'red', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button></td>
+                        </tr>
+                      ))}
+                      {/* Invisible sentinel element for auto-scrolling */}
+                      <div ref={cartEndRef} />
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               <div className="cart-summary" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>

@@ -18,6 +18,13 @@ export default function OrdersPage() {
   const [editingSalesmanOrderId, setEditingSalesmanOrderId] = useState(null);
   const [selectedRepId, setSelectedRepId] = useState('');
 
+  // Action Modal States for Cancel / Reject
+  const [actionModal, setActionModal] = useState({ show: false, type: null, target: null }); // type: 'cancel' | 'reject'
+  const [actionReason, setActionReason] = useState('');
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundMethod, setRefundMethod] = useState('cash');
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+
   // Summary Totals State
   const [summary, setSummary] = useState({
     totalAmount: 0,
@@ -252,6 +259,48 @@ export default function OrdersPage() {
     fetchOrders();
     fetchSummary();
   }, [fetchOrders, fetchSummary]);
+
+  const handleExecuteAction = async () => {
+    if (!actionModal.target || !shopInfo?.id) return;
+    setIsSubmittingAction(true);
+
+    try {
+      if (actionModal.type === 'reject') {
+        const targetType = actionModal.targetTable === 'sales' ? 'sale' : 'sales_order';
+        const { error } = await supabase.rpc('reject_sale_or_order', {
+          p_shop_id: shopInfo.id,
+          p_target_id: actionModal.target.id,
+          p_target_type: targetType,
+          p_reason: actionReason.trim() || 'Internal data entry error'
+        });
+        if (error) throw error;
+        alert('Record successfully rejected/voided.');
+      } else if (actionModal.type === 'cancel') {
+        // <--- FIX: Fall back to actionModal.target.paid_amount if refundAmount input is empty/blank
+        const finalRefundAmt = refundAmount !== '' ? Number(refundAmount) : Number(actionModal.target.paid_amount || 0);
+
+        const { error } = await supabase.rpc('cancel_sales_order', {
+          p_shop_id: shopInfo.id,
+          p_sales_order_id: actionModal.target.id,
+          p_refund_amount: finalRefundAmt, // <--- Passed correctly to RPC
+          p_refund_method: refundMethod,   // <--- Passed correctly to RPC
+          p_reason: actionReason.trim() || 'Customer cancelled order'
+        });
+        if (error) throw error;
+        alert('Order successfully cancelled and refund recorded.');
+      }
+
+      setActionModal({ show: false, type: null, target: null });
+      setActionReason('');
+      setRefundAmount('');
+      fetchOrders();
+      fetchSummary();
+    } catch (err) {
+      alert(`Action failed: ${err.message}`);
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
 
   const handleUpdateSalesman = async (orderId) => {
     const newSalesmanId = selectedRepId === '' ? null : selectedRepId;
@@ -589,7 +638,9 @@ export default function OrdersPage() {
                           </div>
                           {renderFilterMenu('saleStatus', '', 'select', [
                             {label: 'Converted', value: 'converted'},
-                            {label: 'Open', value: 'open'}
+                            {label: 'Open', value: 'open'},
+                            {label: 'Rejected', value: 'rejected'},
+                            {label: 'Cancelled', value: 'cancelled'}
                           ])}
                         </th>
                       )}
@@ -716,7 +767,27 @@ export default function OrdersPage() {
 
                             {visibleColumns.actions && (
                               <td>
-                                <button className="reprint-btn" onClick={() => handleReprint(order)}>🖨️ Reprint</button>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                  <button className="reprint-btn" onClick={() => handleReprint(order)}>🖨️ Reprint</button>
+                                  {order.conversion_status === 'open' && (
+                                    <>
+                                      <button 
+                                        style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '6px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                        onClick={() => setActionModal({ show: true, type: 'cancel', target: order, targetTable: 'sales_order' })}
+                                        title="Cancel Order"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button 
+                                        style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '6px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                        onClick={() => setActionModal({ show: true, type: 'reject', target: order, targetTable: 'sales_order' })}
+                                        title="Reject / Void"
+                                      >
+                                        Reject
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
                               </td>
                             )}
                           </tr>
@@ -746,6 +817,66 @@ export default function OrdersPage() {
             </>
           )}
         </div>
+
+        {actionModal.show && (
+          <div className="modal-overlay">
+            <div className="modal" style={{ width: '420px' }}>
+              <h3>{actionModal.type === 'reject' ? '⚠️ Confirm Void / Rejection' : '❌ Confirm Order Cancellation'}</h3>
+              <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 12px 0' }}>
+                {actionModal.type === 'reject' 
+                  ? 'This will mark the entry as voided, return items to inventory, and neutralize financial impact.' 
+                  : 'This will cancel the active order and release booked stock.'}
+              </p>
+
+              {actionModal.type === 'cancel' && Number(actionModal.target?.paid_amount || 0) > 0 && (
+                <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '6px', border: '1px solid #bbf7d0', marginBottom: '12px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#166534', marginBottom: '6px' }}>
+                    Advance Paid to Refund: ₹{actionModal.target.paid_amount}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: '11px', color: '#64748b' }}>Refund Amount (₹)</label>
+                      <input type="number" value={refundAmount || actionModal.target.paid_amount} onChange={(e) => setRefundAmount(e.target.value)} className="filter-input" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: '11px', color: '#64748b' }}>Method</label>
+                      <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="filter-input">
+                        <option value="cash">Cash</option>
+                        <option value="upi">UPI</option>
+                        <option value="bank_transfer">Bank Transfer</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}>Reason / Notes *</label>
+              <textarea 
+                placeholder="Enter reason (e.g., Data entry error, Customer changed mind)..." 
+                value={actionReason} 
+                onChange={(e) => setActionReason(e.target.value)} 
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px', minHeight: '70px', boxSizing: 'border-box', marginBottom: '16px' }}
+              />
+
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button 
+                  className="secondary-btn" 
+                  onClick={() => { setActionModal({ show: false, type: null, target: null }); setActionReason(''); }}
+                >
+                  Close
+                </button>
+                <button 
+                  className="primary-btn" 
+                  disabled={isSubmittingAction || !actionReason.trim()}
+                  style={{ background: actionModal.type === 'reject' ? '#dc2626' : '#d97706', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={handleExecuteAction}
+                >
+                  {isSubmittingAction ? 'Processing...' : 'Confirm Action'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <PrintableReceiptModal
           show={showReceiptModal}
@@ -814,7 +945,8 @@ export default function OrdersPage() {
         .status-badge.payment-partial { background: #fef9c3; color: #a16207; }
         .status-badge.payment-pending { background: #fee2e2; color: #b91c1c; }
         .status-badge.sale-completed { background: #f1f5f9; color: #334155; }
-        .status-badge.sale-pre_order { background: #fef3c7; color: #92400e; }
+        .status-badge.sale-rejected { background: #fee2e2; color: #b91c1c; text-decoration: line-through; }
+        .status-badge.sale-cancelled { background: #f1f5f9; color: #64748b; }
         .status-badge.sale-open { background: #fef3c7; color: #92400e; }
         .status-badge.sale-converted { background: #dcfce7; color: #15803d; }
         .status-badge.order-delivered { background: #e0f2fe; color: #0369a1; }
@@ -826,7 +958,8 @@ export default function OrdersPage() {
         .pending-line { color: #b91c1c; margin-top: 2px; }
         .reprint-btn { background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all 0.15s ease; }
         .reprint-btn:hover { background: #e2e8f0; border-color: #94a3b8; }
-
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
+        .modal { background: white; padding: 24px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px; width: 400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
         .pagination-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-top: 1px solid #e2e8f0; background: #fff; font-size: 13px; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
         .pagination-info { display: flex; align-items: center; gap: 10px; color: #475569; }
         .page-size-select { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
