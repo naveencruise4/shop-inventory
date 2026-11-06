@@ -471,6 +471,12 @@ const handleCheckout = async () => {
     if (cart.length === 0) return;
 
     const enteredPaid = amountPaid !== '' ? Number(amountPaid) : 0;
+    // Guard: Prevent paying more than due on pre-orders
+    if (convertingPreOrder && enteredPaid > netOutstandingDue) {
+      alert(`⚠️ Today's payment (₹${enteredPaid.toFixed(2)}) cannot exceed the remaining due balance of ₹${netOutstandingDue.toFixed(2)}.`);
+      setIsCheckingOut(false);
+      return;
+    }
     setIsCheckingOut(true);
 
     try {
@@ -1244,12 +1250,30 @@ const handleCheckout = async () => {
                       <span className="font-semibold">Today's Payment Received (₹):</span>
                       <input
                         type="number"
-                        placeholder="0"
+                        placeholder={netOutstandingDue <= 0 ? 'Fully Paid' : '0'}
+                        disabled={netOutstandingDue <= 0}
+                        max={netOutstandingDue}
                         value={amountPaid}
-                        onChange={(e) => setAmountPaid(e.target.value)}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          // Guardrail: Do not allow entering more than the net outstanding due
+                          if (val > netOutstandingDue) {
+                            alert(`⚠️ Payment cannot exceed the remaining due amount of ₹${netOutstandingDue.toFixed(2)}`);
+                            setAmountPaid(netOutstandingDue.toString());
+                            return;
+                          }
+                          setAmountPaid(e.target.value);
+                        }}
                         className="custom-total-input pay-input"
+                        style={{ background: netOutstandingDue <= 0 ? '#f1f5f9' : '#fff' }}
                       />
                     </div>
+
+                    {netOutstandingDue <= 0 && (
+                      <div style={{ fontSize: '11px', color: '#16a34a', background: '#dcfce7', padding: '4px 8px', borderRadius: '4px', textAlign: 'center', fontWeight: 600 }}>
+                        ✓ Order fully covered by advance. No additional payment required.
+                      </div>
+                    )}
 
                     <div className="summary-row subtext-balance">
                       <span>Remaining Balance After Today:</span>
