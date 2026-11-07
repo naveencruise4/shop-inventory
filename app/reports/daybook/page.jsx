@@ -23,6 +23,10 @@ export default function DayBookPage() {
   const [remitRef, setRemitRef] = useState('');
   const [remitNotes, setRemitNotes] = useState('');
 
+  // Opening Balance Modal State
+  const [showOpeningModal, setShowOpeningModal] = useState(false);
+  const [newOpeningAmt, setNewOpeningAmt] = useState('');
+
   useEffect(() => {
     initPage();
   }, []);
@@ -40,10 +44,6 @@ export default function DayBookPage() {
       }
     }
   };
-
-  // Opening Balance Modal State
-  const [showOpeningModal, setShowOpeningModal] = useState(false);
-  const [newOpeningAmt, setNewOpeningAmt] = useState('');
 
   const handleSaveOpeningBalance = async (e) => {
     e.preventDefault();
@@ -83,7 +83,7 @@ export default function DayBookPage() {
         .eq('shop_id', sid)
         .eq('tx_date', dateStr);
 
-      // 2. Fetch Outflows (includes purchase payments, expenses, and cash remittances)
+      // 2. Fetch Outflows
       const { data: outData } = await supabase
         .from('vw_day_book_outflows')
         .select('*')
@@ -107,6 +107,7 @@ export default function DayBookPage() {
       setLoading(false);
     }
   }, [shopInfo?.id]);
+
 
   useEffect(() => {
     if (shopInfo?.id) {
@@ -141,15 +142,10 @@ export default function DayBookPage() {
     }
   };
 
-  const totalIn = inflows.reduce((sum, i) => sum + Number(i.amount || 0), 0);
-  const totalOut = outflows.reduce((sum, o) => sum + Number(o.amount || 0), 0);
-  const netMovement = totalIn - totalOut;
-  const expectedClosingCash = openingBalance + netMovement;
-
-  // Breakdown by method
+// Breakdown by method helper
   const groupByMethod = (list) => {
     return list.reduce((acc, curr) => {
-      const method = (curr.payment_method || 'cash').toUpperCase();
+      const method = (curr.payment_method || 'cash').toLowerCase();
       acc[method] = (acc[method] || 0) + Number(curr.amount || 0);
       return acc;
     }, {});
@@ -158,7 +154,16 @@ export default function DayBookPage() {
   const inByMethod = groupByMethod(inflows);
   const outByMethod = groupByMethod(outflows);
 
-  // Combine chronological including Opening Balance as the first reference row if needed
+  // Totals calculation (Fixed initial values)
+  const totalIn = inflows.reduce((sum, i) => sum + Number(i.amount || 0), 0);
+  const totalOut = outflows.reduce((sum, o) => sum + Number(o.amount || 0), 0);
+
+  // Cash Specific Calculations
+  const cashIn = inByMethod['cash'] || 0;
+  const cashOut = outByMethod['cash'] || 0;
+  const expectedClosingCash = openingBalance + totalIn - totalOut;
+
+  // Combine chronological
   const combinedTxs = [
     ...inflows.map(i => ({ ...i, type: 'in', displayAmount: i.amount })),
     ...outflows.map(o => ({ ...o, type: 'out', displayAmount: o.amount }))
@@ -171,7 +176,7 @@ export default function DayBookPage() {
         <div className="top-bar">
           <div>
             <h1>Day Book (Cash Flow Reconciliation)</h1>
-            <p className="subtext">Track daily money in, money out, and cash drawer reconciliations[cite: 6]</p>
+            <p className="subtext">Track daily drawer cash, digital receipts, and reconciliations[cite: 6]</p>
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <button className="primary-btn" onClick={() => setShowRemittanceModal(true)}>+ Record Cash Drop / Deposit</button>
@@ -202,40 +207,55 @@ export default function DayBookPage() {
             </div>
             <span className="summary-value">₹{openingBalance.toFixed(2)}</span>
           </div>
+
           <div className="summary-card success">
             <span className="summary-label">Total Money In</span>
             <span className="summary-value">+₹{totalIn.toFixed(2)}</span>
+            <div className="sub-breakdown">
+              <span>Cash: +₹{cashIn.toFixed(2)}</span>
+              <span>Other: +₹{(totalIn - cashIn).toFixed(2)}</span>
+            </div>
           </div>
+
           <div className="summary-card danger">
             <span className="summary-label">Total Money Out</span>
             <span className="summary-value">-₹{totalOut.toFixed(2)}</span>
+            <div className="sub-breakdown">
+              <span>Cash: -₹{cashOut.toFixed(2)}</span>
+              <span>Other: -₹{(totalOut - cashOut).toFixed(2)}</span>
+            </div>
           </div>
-          <div className="summary-card" style={{ borderLeftColor: '#0f172a' }}>
+
+          <div className="summary-card highlight" style={{ borderLeftColor: '#0f172a' }}>
             <span className="summary-label">Expected Closing Cash</span>
             <span className="summary-value" style={{ color: expectedClosingCash >= 0 ? '#0f172a' : '#dc2626' }}>
               ₹{expectedClosingCash.toFixed(2)}
             </span>
+            <div className="sub-breakdown">
+              <span>Cash Net: ₹{cashIn - cashOut}</span>
+              <span>Other Net: ₹{totalIn - totalOut - (cashIn - cashOut)}</span>
+            </div>
           </div>
         </div>
 
-        {/* Method Breakdowns */}
+        {/* Method Breakdowns Grid */}
         <div className="breakdown-grid">
           <div className="card">
-            <h4>Inflows by Method</h4>
+            <h4>Inflows by Payment Method</h4>
             <ul>
               {Object.keys(inByMethod).length === 0 ? <p className="subtext">No inflows recorded.</p> :
                 Object.entries(inByMethod).map(([m, amt]) => (
-                  <li key={m}><span>{m}:</span> <strong>₹{amt.toFixed(2)}</strong></li>
+                  <li key={m}><span>{m.toUpperCase()}:</span> <strong>₹{amt.toFixed(2)}</strong></li>
                 ))
               }
             </ul>
           </div>
           <div className="card">
-            <h4>Outflows by Method</h4>
+            <h4>Outflows by Payment Method</h4>
             <ul>
               {Object.keys(outByMethod).length === 0 ? <p className="subtext">No outflows recorded.</p> :
                 Object.entries(outByMethod).map(([m, amt]) => (
-                  <li key={m}><span>{m}:</span> <strong>₹{amt.toFixed(2)}</strong></li>
+                  <li key={m}><span>{m.toUpperCase()}:</span> <strong>₹{amt.toFixed(2)}</strong></li>
                 ))
               }
             </ul>
@@ -263,9 +283,9 @@ export default function DayBookPage() {
                   <tr style={{ background: '#f8fafc', fontWeight: 'bold' }}>
                     <td>00:00</td>
                     <td><span className="invoice-badge gst" style={{ background: '#e2e8f0', color: '#334155' }}>Opening Balance</span></td>
-                    <td>Carried forward from previous shift/day</td>
+                    <td>Carried forward cash baseline</td>
                     <td>CASH</td>
-                    <td colSpan={2} style={{ color: '#0f172a' }}>₹{openingBalance.toFixed(2)} (Baseline)</td>
+                    <td colSpan={2} style={{ color: '#0f172a' }}>₹{openingBalance.toFixed(2)} (Cash Drawer Baseline)</td>
                   </tr>
 
                   {combinedTxs.length === 0 ? (
@@ -291,6 +311,7 @@ export default function DayBookPage() {
             </div>
           )}
         </div>
+
         {/* Modal: Edit Opening Balance */}
         {showOpeningModal && (
           <div className="modal-overlay">
@@ -362,6 +383,7 @@ export default function DayBookPage() {
         .summary-card.danger { border-left-color: #dc2626; }
         .summary-label { font-size: 11px; text-transform: uppercase; font-weight: 700; color: #64748b; }
         .summary-value { font-size: 20px; font-weight: 700; color: #0f172a; }
+        .sub-breakdown { display: flex; justify-content: space-between; font-size: 11px; color: #475569; margin-top: 4px; border-top: 1px dashed #e2e8f0; padding-top: 4px; }
         .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; flex-shrink: 0; }
         .breakdown-grid ul { list-style: none; padding: 0; margin: 8px 0 0 0; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
         .breakdown-grid li { display: flex; justify-content: space-between; text-transform: capitalize; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px; }

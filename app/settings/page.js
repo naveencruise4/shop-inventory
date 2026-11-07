@@ -21,7 +21,8 @@ export default function SettingsPage() {
     phone: '',
     currency: '₹',
     has_gst: false,
-    gstin: ''
+    gstin: '',
+    logo_url: ''
   });
 
   // Password Update State
@@ -68,13 +69,43 @@ export default function SettingsPage() {
           phone: shop.phone || '',
           currency: shop.currency || '₹',
           has_gst: shop.has_gst || false,
-          gstin: shop.gstin || ''
+          gstin: shop.gstin || '',
+          logo_url: shop.logo_url || ''
         });
       }
     } catch (err) {
       console.error('Error loading profile/shop details:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !shopId) return;
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${shopId}-logo.${fileExt}`;
+      const filePath = `logos/${fileName}`;
+
+      // 1. Upload file to Supabase Storage bucket ('shop-assets')
+      const { error: uploadError } = await supabase.storage
+        .from('shop-assets')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // 2. Get Public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('shop-assets')
+        .getPublicUrl(filePath);
+
+      // 3. Update local state
+      setShopData(prev => ({ ...prev, logo_url: publicUrl }));
+      alert('✅ Logo uploaded successfully! Click "Save Shop Profile" to finalize.');
+    } catch (err) {
+      alert(`Failed to upload logo: ${err.message}`);
     }
   };
 
@@ -92,14 +123,139 @@ export default function SettingsPage() {
           phone: shopData.phone,
           currency: shopData.currency,
           has_gst: shopData.has_gst,
-          gstin: shopData.has_gst ? shopData.gstin.trim() : null
+          gstin: shopData.has_gst ? shopData.gstin.trim() : null,
+          logo_url: shopData.logo_url || null
         })
         .eq('id', shopId);
 
       if (error) throw error;
       alert('Shop profile updated successfully!');
     } catch (err) {
-      alert(`Failed to update shop details: ${err.message}`); } finally { setSaving(false); } };  const handleUpdatePassword = async (e) => { e.preventDefault(); setPassMessage({ text: '', type: '' });  if (passwords.newPassword !== passwords.confirmPassword) { setPassMessage({ text: 'New passwords do not match.', type: 'error' }); return; }  if (passwords.newPassword.length < 6) { setPassMessage({ text: 'Password must be at least 6 characters long.', type: 'error' }); return; }  try { const { error } = await supabase.auth.updateUser({ password: passwords.newPassword });  if (error) throw error;  setPassMessage({ text: 'Password updated successfully!', type: 'success' }); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }); } catch (err) { setPassMessage({ text: err.message, type: 'error' }); } };  const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login'); };  if (loading) { return ( <div className="layout"> <Sidebar /> <main className="content"><p>Loading account settings...</p></main> </div> ); }  return ( <div className="layout"> <Sidebar /> <main className="content"> <div className="top-bar"> <h1>Account & Shop Settings</h1> </div>  <div className="settings-grid"> {/* Shop Information Card */} <div className="card"> <h3>Shop Profile Configuration</h3> <p className="subtext">Manage your active business name, location, and communication details.</p>  <form onSubmit={handleUpdateShop} className="settings-form"> <div className="form-group"> <label>Shop Name <span className="required">*</span></label> <input type="text" value={shopData.name} onChange={(e) => setShopData({ ...shopData, name: e.target.value })} required /> </div>  <div className="form-group"> <label>Business Phone Number</label> <input type="text" value={shopData.phone} onChange={(e) => setShopData({ ...shopData, phone: e.target.value })} placeholder="e.g., +91 98765 43210" /> </div>  <div className="form-group"> <label>Shop Address</label> <textarea rows="3" value={shopData.address} onChange={(e) => setShopData({ ...shopData, address: e.target.value })} placeholder="Enter complete store address..." /> </div>  <div className="form-group"> <label>Default Currency Symbol <span className="required">*</span></label> <input type="text" value={shopData.currency} onChange={(e) => setShopData({ ...shopData, currency: e.target.value })} maxLength="5" required /> </div>  {/* GST Configuration Toggles */} <div className="form-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '8px', marginTop: '6px' }}> <input type="checkbox" id="has_gst" checked={shopData.has_gst} onChange={(e) => setShopData({ ...shopData, has_gst: e.target.checked })} style={{ width: '18px', height: '18px', cursor: 'pointer' }} /> <label htmlFor="has_gst" style={{ cursor: 'pointer', fontWeight: 600, color: '#0f172a' }}>Enable GST Billing (Registered Business)</label> </div>  {shopData.has_gst && ( <div className="form-group" style={{ animation: 'fadeIn 0.2s ease-in-out' }}> <label>GSTIN (Goods and Services Tax Identification Number) <span className="required">*</span></label> <input type="text" value={shopData.gstin} onChange={(e) => setShopData({ ...shopData, gstin: e.target.value })} placeholder="e.g., 33AAAAA0000A1Z5" required={shopData.has_gst} /> </div> )}  <button type="submit" className="action-btn" disabled={saving}> {saving ? 'Saving Changes...' : 'Save Shop Profile'} </button> </form> </div>  {/* Login & Security Management Card */} <div className="card"> <h3>Login Credentials & Security</h3> <p className="subtext">Signed in as: <strong>{userEmail}</strong></p>  <form onSubmit={handleUpdatePassword} className="settings-form"> <div className="form-group"> <label>New Password <span className="required">*</span></label> <input type="password" value={passwords.newPassword} onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })} placeholder="Min. 6 characters" required /> </div>  <div className="form-group"> <label>Confirm New Password <span className="required">*</span></label> <input type="password" value={passwords.confirmPassword} onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })} placeholder="Re-enter new password" required /> </div>  {passMessage.text && ( <div className={`message-box ${passMessage.type}`}>
+      alert(`Failed to update shop details: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdatePassword = async (e) => {
+    e.preventDefault();
+    setPassMessage({ text: '', type: '' });
+
+    if (passwords.newPassword !== passwords.confirmPassword) {
+      setPassMessage({ text: 'New passwords do not match.', type: 'error' });
+      return;
+    }
+    if (passwords.newPassword.length < 6) {
+      setPassMessage({ text: 'Password must be at least 6 characters long.', type: 'error' });
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password: passwords.newPassword });
+      if (error) throw error;
+      setPassMessage({ text: 'Password updated successfully!', type: 'success' });
+      setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      setPassMessage({ text: err.message, type: 'error' });
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
+
+  if (loading) {
+    return (
+      <div className="layout">
+        <Sidebar />
+        <main className="content"><p>Loading account settings...</p></main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="layout">
+      <Sidebar />
+      <main className="content">
+        <div className="top-bar">
+          <h1>Account & Shop Settings</h1>
+        </div>
+
+        <div className="settings-grid">
+          {/* Shop Information Card */}
+          <div className="card">
+            <h3>Shop Profile Configuration</h3>
+            <p className="subtext">Manage your active business name, location, logo, and communication details.</p>
+
+            <form onSubmit={handleUpdateShop} className="settings-form">
+              <div className="form-group">
+                <label>Shop Name <span className="required">*</span></label>
+                <input type="text" value={shopData.name} onChange={(e) => setShopData({ ...shopData, name: e.target.value })} required />
+              </div>
+
+              <div className="form-group">
+                <label>Shop Logo</label>
+                {shopData.logo_url && (
+                  <div style={{ marginBottom: '6px' }}>
+                    <img src={shopData.logo_url} alt="Shop Logo Preview" style={{ maxHeight: '45px', objectFit: 'contain' }} />
+                  </div>
+                )}
+                <input type="file" accept="image/*" onChange={handleLogoUpload} style={{ padding: '6px' }} />
+              </div>
+
+              <div className="form-group">
+                <label>Business Phone Number</label>
+                <input type="text" value={shopData.phone} onChange={(e) => setShopData({ ...shopData, phone: e.target.value })} placeholder="e.g., +91 98765 43210" />
+              </div>
+
+              <div className="form-group">
+                <label>Shop Address</label>
+                <textarea rows="3" value={shopData.address} onChange={(e) => setShopData({ ...shopData, address: e.target.value })} placeholder="Enter complete store address..." />
+              </div>
+
+              <div className="form-group">
+                <label>Default Currency Symbol <span className="required">*</span></label>
+                <input type="text" value={shopData.currency} onChange={(e) => setShopData({ ...shopData, currency: e.target.value })} maxLength="5" required />
+              </div>
+
+              {/* GST Configuration Toggles */}
+              <div className="form-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                <input type="checkbox" id="has_gst" checked={shopData.has_gst} onChange={(e) => setShopData({ ...shopData, has_gst: e.target.checked })} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                <label htmlFor="has_gst" style={{ cursor: 'pointer', fontWeight: 600, color: '#0f172a' }}>Enable GST Billing (Registered Business)</label>
+              </div>
+
+              {shopData.has_gst && (
+                <div className="form-group" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
+                  <label>GSTIN (Goods and Services Tax Identification Number) <span className="required">*</span></label>
+                  <input type="text" value={shopData.gstin} onChange={(e) => setShopData({ ...shopData, gstin: e.target.value })} placeholder="e.g., 33AAAAA0000A1Z5" required={shopData.has_gst} />
+                </div>
+              )}
+
+              <button type="submit" className="action-btn" disabled={saving}>
+                {saving ? 'Saving Changes...' : 'Save Shop Profile'}
+              </button>
+            </form>
+          </div>
+
+          {/* Login & Security Management Card */}
+          <div className="card">
+            <h3>Login Credentials & Security</h3>
+            <p className="subtext">Signed in as: <strong>{userEmail}</strong></p>
+
+            <form onSubmit={handleUpdatePassword} className="settings-form">
+              <div className="form-group">
+                <label>New Password <span className="required">*</span></label>
+                <input type="password" value={passwords.newPassword} onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })} placeholder="Min. 6 characters" required />
+              </div>
+
+              <div className="form-group">
+                <label>Confirm New Password <span className="required">*</span></label>
+                <input type="password" value={passwords.confirmPassword} onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })} placeholder="Re-enter new password" required />
+              </div>
+
+              {passMessage.text && (
+                <div className={`message-box ${passMessage.type}`}>
                   {passMessage.text}
                 </div>
               )}

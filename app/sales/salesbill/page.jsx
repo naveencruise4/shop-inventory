@@ -908,7 +908,7 @@ export default function OrdersPage() {
         .status-badge.payment-paid { background: #dcfce7; color: #15803d; }
         .status-badge.payment-partial { background: #fef9c3; color: #a16207; }
         .status-badge.payment-pending { background: #fee2e2; color: #b91c1c; }
-        .status-badge.sale-completed { background: #f1f5f9; color: #334155; }
+        .status-badge.sale-completed { background: #dcfce7; color: #15803d; }
         // .status-badge.sale-rejected { background: #fef3c7; color: #b91c1c;}
         .status-badge.order-delivered { background: #e0f2fe; color: #0369a1; }
         .status-badge.order-confirmed { background: #f3e8ff; color: #6b21a8; }
