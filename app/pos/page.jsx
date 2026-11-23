@@ -569,7 +569,7 @@ const handleCheckout = async () => {
           }
         }
 
-        if (amountPaid === '') {
+        if (netOutstandingDue > 0 && amountPaid === '') {
           alert('⚠️ Please enter the final balancing amount paid.');
           setIsCheckingOut(false);
           return;
